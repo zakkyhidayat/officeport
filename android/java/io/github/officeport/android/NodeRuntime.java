@@ -1,0 +1,215 @@
+package io.github.officeport.android;
+
+import android.content.Context;
+import android.content.res.AssetManager;
+import android.system.Os;
+import android.util.Log;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
+import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+
+/**
+ * GenOffice's main process: unpacks the payload (GenOffice's resources and
+ * the runtime scripts, assets/payload.zip) once per version, then runs it
+ * on the bundled Node (libgonode.so in the native library directory).
+ */
+final class NodeRuntime {
+    private static final String TAG = "officeport";
+
+    interface Listener {
+        void onProgress(String text, int percent);
+        void onReady(int port, String token);
+        void onExit(int code, String lastLines);
+    }
+
+    private final Context context;
+    private final Listener listener;
+    private Process process;
+    private final StringBuilder tail = new StringBuilder();
+
+    NodeRuntime(Context context, Listener listener) {
+        this.context = context;
+        this.listener = listener;
+    }
+
+    File root() {
+        return new File(context.getFilesDir(), "go");
+    }
+
+    File resources() {
+        return new File(root(), "res");
+    }
+
+    /** Unpacks assets/payload.zip unless this version already did. */
+    void unpack() throws IOException {
+        AssetManager assets = context.getAssets();
+        String stamp;
+        try (InputStream in = assets.open("payload.stamp")) {
+            stamp = new String(readAll(in), StandardCharsets.UTF_8).trim();
+        }
+        File root = root();
+        File stampFile = new File(root, ".stamp");
+        if (stampFile.exists() && stamp.equals(new String(java.nio.file.Files.readAllBytes(stampFile.toPath()), StandardCharsets.UTF_8).trim())) {
+            linkNative();
+            return;
+        }
+        listener.onProgress("Preparing GenOffice…", 0);
+        deleteTree(root);
+        if (!root.mkdirs() && !root.isDirectory()) throw new IOException("cannot create " + root);
+        long total;
+        try (InputStream in = assets.open("payload.size")) {
+            total = Long.parseLong(new String(readAll(in), StandardCharsets.UTF_8).trim());
+        }
+        long done = 0;
+        int lastPercent = -1;
+        byte[] buf = new byte[1 << 16];
+        try (ZipInputStream zip = new ZipInputStream(assets.open("payload.zip", AssetManager.ACCESS_STREAMING))) {
+            ZipEntry e;
+            String rootPath = root.getCanonicalPath() + File.separator;
+            while ((e = zip.getNextEntry()) != null) {
+                File out = new File(root, e.getName());
+                if (!out.getCanonicalPath().startsWith(rootPath)) throw new IOException("bad entry " + e.getName());
+                if (e.isDirectory()) {
+                    out.mkdirs();
+                    continue;
+                }
+                out.getParentFile().mkdirs();
+                try (OutputStream os = new FileOutputStream(out)) {
+                    int n;
+                    while ((n = zip.read(buf)) > 0) {
+                        os.write(buf, 0, n);
+                        done += n;
+                    }
+                }
+                int percent = (int) (done * 100 / Math.max(1, total));
+                if (percent != lastPercent) {
+                    lastPercent = percent;
+                    listener.onProgress("Preparing GenOffice…", percent);
+                }
+            }
+        }
+        linkNative();
+        try (OutputStream os = new FileOutputStream(stampFile)) {
+            os.write(stamp.getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    /** resources/native/xlsx-sidecar -> the sidecar in the native library
+     * directory, which moves when the app is updated. */
+    private void linkNative() throws IOException {
+        File nativeDir = new File(resources(), "native");
+        nativeDir.mkdirs();
+        File link = new File(nativeDir, "xlsx-sidecar");
+        link.delete();
+        try {
+            Os.symlink(new File(context.getApplicationInfo().nativeLibraryDir, "libxlsxsidecar.so").getPath(), link.getPath());
+        } catch (Exception e) {
+            throw new IOException("symlink: " + e);
+        }
+    }
+
+    static String newToken() {
+        byte[] b = new byte[16];
+        new SecureRandom().nextBytes(b);
+        StringBuilder s = new StringBuilder();
+        for (byte x : b) s.append(String.format("%02x", x));
+        return s.toString();
+    }
+
+    void start(Map<String, String> extraEnv) throws IOException {
+        String libDir = context.getApplicationInfo().nativeLibraryDir;
+        File data = new File(context.getFilesDir(), "data");
+        File home = new File(data, "home");
+        File tmp = new File(context.getCacheDir(), "tmp");
+        home.mkdirs();
+        tmp.mkdirs();
+        ProcessBuilder pb = new ProcessBuilder(
+                libDir + "/libgonode.so",
+                "--max-old-space-size=3072",
+                "--disable-warning=ExperimentalWarning",
+                new File(root(), "runtime/main.js").getPath());
+        pb.directory(home);
+        pb.redirectErrorStream(true);
+        Map<String, String> env = pb.environment();
+        env.put("LD_LIBRARY_PATH", libDir);
+        env.put("HOME", home.getPath());
+        env.put("TMPDIR", tmp.getPath());
+        env.put("GO_RES", resources().getPath());
+        env.put("GO_DATA", data.getPath());
+        env.put("NODE_OPTIONS", "");
+        env.putAll(extraEnv);
+        process = pb.start();
+        Thread reader = new Thread(this::pump, "node-output");
+        reader.setDaemon(true);
+        reader.start();
+    }
+
+    private void pump() {
+        boolean ready = false;
+        try (BufferedReader r = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                Log.i("node", line);
+                synchronized (tail) {
+                    tail.append(line).append('\n');
+                    if (tail.length() > 6000) tail.delete(0, tail.length() - 6000);
+                }
+                if (!ready && line.startsWith("GO_READY ")) {
+                    String[] parts = line.split(" ");
+                    ready = true;
+                    listener.onReady(Integer.parseInt(parts[1]), parts[2]);
+                }
+            }
+        } catch (IOException e) {
+            Log.w(TAG, "node output", e);
+        }
+        int code;
+        try {
+            code = process.waitFor();
+        } catch (InterruptedException e) {
+            code = -1;
+        }
+        String last;
+        synchronized (tail) {
+            last = tail.toString();
+        }
+        listener.onExit(code, last);
+    }
+
+    void stop() {
+        if (process != null) process.destroy();
+    }
+
+    static byte[] readAll(InputStream in) throws IOException {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+        return out.toByteArray();
+    }
+
+    static void deleteTree(File f) {
+        if (!f.exists()) return;
+        File[] children = f.isDirectory() && !isSymlink(f) ? f.listFiles() : null;
+        if (children != null) for (File c : children) deleteTree(c);
+        f.delete();
+    }
+
+    private static boolean isSymlink(File f) {
+        try {
+            return java.nio.file.Files.isSymbolicLink(f.toPath());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+}
