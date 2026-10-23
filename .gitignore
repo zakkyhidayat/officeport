@@ -1,3 +1,5 @@
 build/
 dist/
 *.keystore
+desktop/gnome/app.asar
+desktop/gnome/app.asar.orig
