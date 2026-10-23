@@ -485,6 +485,9 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         s.setUserAgentString(userAgent(s));
         v.setBackgroundColor(themeBackground());
         v.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        // the page draws its own scrollbars; WebView's Android-style ones on top look like a phone browser
+        v.setVerticalScrollBarEnabled(false);
+        v.setHorizontalScrollBarEnabled(false);
         v.setFocusable(true);
         v.setFocusableInTouchMode(true);
         v.addJavascriptInterface(new PageBridge(wc), "GenOfficeHost");
@@ -500,6 +503,10 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
             v = webs.get(wc);
         }
         lastUrl.put(wc, url);
+        // hidden until the new page has painted (Client reveals it): no blank or
+        // half-drawn frame while the document loads, the way a native screen appears
+        v.animate().cancel();
+        v.setAlpha(0f);
         v.loadUrl(url);
     }
 
@@ -563,12 +570,27 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         }
 
         @Override
+        public void onPageCommitVisible(WebView view, String url) {
+            reveal(view);
+        }
+
+        @Override
+        public void onPageFinished(WebView view, String url) {
+            reveal(view);
+        }
+
+        private void reveal(WebView view) {
+            if (view.getAlpha() < 1f && view.animate() != null) view.animate().alpha(1f).setDuration(120).start();
+        }
+
+        @Override
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
             if (host != null) host.event("wc", "wc", wc, "name", "did-navigate", "url", url);
         }
 
         @Override
         public void onReceivedError(WebView view, WebResourceRequest r, android.webkit.WebResourceError error) {
+            if (r.isForMainFrame()) view.setAlpha(1f);
             if (r.isForMainFrame() && host != null) {
                 host.event("wc", "wc", wc, "name", "did-fail-load", "code", error.getErrorCode(), "description", String.valueOf(error.getDescription()), "url", r.getUrl().toString());
             }

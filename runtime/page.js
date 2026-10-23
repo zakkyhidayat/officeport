@@ -8,6 +8,20 @@
   if (window.__goBooted || window.top !== window) return
   window.__goBooted = true
 
+  // what gives a web page away on a touch screen, as a desktop app does not
+  // show it: the tap flash, the long-press callout, the bounce at the edges,
+  // phone-style text inflation, and dragging images and links out. :where()
+  // keeps these below any style the app sets itself.
+  const nativeFeel = document.createElement('style')
+  nativeFeel.textContent = `
+:where(html) { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; overscroll-behavior: none; }
+:where(*) { -webkit-tap-highlight-color: transparent; }
+:where(body) { -webkit-touch-callout: none; }
+:where(input, textarea, [contenteditable]:not([contenteditable="false"])) { -webkit-touch-callout: default; }
+:where(img, a) { -webkit-user-drag: none; }
+`
+  ;(document.head || document.documentElement).appendChild(nativeFeel)
+
   const codec = window.__goCodec
   const H = window.GenOfficeHost
   let wc = 0
