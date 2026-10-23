@@ -65,20 +65,3 @@ Spelling follows Android's system spell checker and its languages (Settings >
 System > Languages > Spell checker). A word added to the dictionary from the
 context menu stops being offered as a mistake there, but WebView still
 underlines it: only the keyboard can add words to Android's own dictionary.
-
-## GNOME window buttons for desktop GenOffice (Linux)
-
-Separate from the Android port: `desktop/gnome/` replaces the window buttons
-of the installed desktop GenOffice (Electron's title bar overlay) with
-GNOME's, laid out as libadwaita lays them out (24 px circles in 34 px buttons 3 px apart, 7 px
-from the edge, Adwaita icons, dimmed when the window is not focused) and on
-the side GNOME's `button-layout` setting puts them.
-
-```bash
-desktop/gnome/update-genoffice.sh
-```
-
-It patches `/opt/GenOffice/resources/app.asar` (asking for sudo) and keeps the
-unpatched one as `app.asar.orig`. Run it again after each GenOffice update; a
-version already patched is left alone. `--no-install` only writes the patched
-`app.asar`; `--restore` puts the unpatched one back.
