@@ -157,6 +157,8 @@ final class NodeRuntime {
         env.put("GO_PORT", Integer.toString(40000 + android.os.Process.myUid() % 10000));
         // the payload's version: bus.js tags GenOffice's static files with it
         env.put("GO_STAMP", stamp);
+        // libuv's pool runs file reads, zlib and crypto: one thread per core (4-16)
+        env.put("UV_THREADPOOL_SIZE", Integer.toString(Math.max(4, Math.min(16, Runtime.getRuntime().availableProcessors()))));
         // V8 code cache for GenOffice's large main bundle: later launches skip most compiling
         env.put("NODE_COMPILE_CACHE", new File(context.getCacheDir(), "node-compile-cache").getPath());
         File certs = writeCaCerts();

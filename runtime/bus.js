@@ -174,7 +174,8 @@ class Bus {
   }
 
   start() {
-    const server = http.createServer((req, res) => {
+    // small IPC replies go out at once, not held back by Nagle's algorithm
+    const server = http.createServer({ noDelay: true }, (req, res) => {
       this.route(req, res).catch((err) => {
         console.error('[bus]', req.method, req.url, err)
         if (!res.headersSent) res.writeHead(500)
