@@ -255,6 +255,35 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         root.addView(box);
     }
 
+    private android.os.FileObserver fontsObserver;
+    private boolean fontsDialogShown;
+
+    /** GenOffice reads its fonts once, at start: a font copied into the fonts
+     * folder offers a restart (the same restart a crash uses). */
+    private void watchFonts() {
+        if (fontsObserver != null || !Paths.hasAllFiles()) return;
+        File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "GenOffice/Fonts");
+        if (!dir.isDirectory()) return;
+        fontsObserver = new android.os.FileObserver(dir, android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO) {
+            @Override
+            public void onEvent(int event, String name) {
+                if (name == null || !name.matches("(?i).+\\.(ttf|otf|ttc|otc)")) return;
+                main.post(() -> {
+                    if (fontsDialogShown || isFinishing()) return;
+                    fontsDialogShown = true;
+                    new AlertDialog.Builder(MainActivity.this)
+                            .setTitle("New font added")
+                            .setMessage(name + " can be used after GenOffice restarts. Save your work first.")
+                            .setPositiveButton("Restart now", (d, w) -> relaunch())
+                            .setNegativeButton("Later", (d, w) -> fontsDialogShown = false)
+                            .setOnCancelListener(d -> fontsDialogShown = false)
+                            .show();
+                });
+            }
+        };
+        fontsObserver.startWatching();
+    }
+
     /** Once, when the fonts folder exists (it needs all-files access): where downloaded fonts go. */
     private void showFontsHint() {
         if (!Paths.hasAllFiles()) return;
@@ -307,6 +336,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
             host.open();
             connected = true;
             showFontsHint();
+            watchFonts();
             sendDisplay();
             for (String p : pendingOpen) host.event("open-file", "path", p);
             pendingOpen.clear();
@@ -1404,6 +1434,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         for (WebView v : webs.values()) v.destroy();
         webs.clear();
         if (spelling != null) spelling.close();
+        if (fontsObserver != null) fontsObserver.stopWatching();
         super.onDestroy();
     }
 }
