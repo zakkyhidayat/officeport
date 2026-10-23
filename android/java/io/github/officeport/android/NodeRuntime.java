@@ -147,6 +147,8 @@ final class NodeRuntime {
         env.put("GO_RES", resources().getPath());
         env.put("GO_DATA", data.getPath());
         env.put("NODE_OPTIONS", "");
+        // V8 code cache for GenOffice's large main bundle: later launches skip most compiling
+        env.put("NODE_COMPILE_CACHE", new File(context.getCacheDir(), "node-compile-cache").getPath());
         File certs = writeCaCerts();
         if (certs != null) {
             // Termux's OpenSSL looks under /data/data/com.termux, which is not there

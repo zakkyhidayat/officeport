@@ -98,6 +98,14 @@ function injectPage(html) {
   return PAGE_SCRIPT + html
 }
 
+let pageScriptCache = null
+/** What every page runs first; read once (on every request while developing). */
+function pageScript() {
+  if (pageScriptCache && !DEV) return pageScriptCache
+  pageScriptCache = ['codec.js', 'urlmap.js', 'page.js'].map((f) => fs.readFileSync(path.join(RUNTIME, f), 'utf8')).join('\n')
+  return pageScriptCache
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = []
@@ -317,12 +325,7 @@ class Bus {
   async routeBus(req, res, url) {
     const p = url.pathname
     if (p === '/__go/page.js') {
-      const body =
-        fs.readFileSync(path.join(RUNTIME, 'codec.js'), 'utf8') +
-        '\n' +
-        fs.readFileSync(path.join(RUNTIME, 'urlmap.js'), 'utf8') +
-        '\n' +
-        fs.readFileSync(path.join(RUNTIME, 'page.js'), 'utf8')
+      const body = pageScript()
       res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' })
       return res.end(body)
     }
