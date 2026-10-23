@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- a bold white O, inside the adaptive icon's 66dp safe zone -->
+<!-- the app's O, white, 56dp wide in the middle of the adaptive icon (its safe zone is 66dp) -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#ffffff" android:fillType="evenOdd"
-        android:pathData="M54,32 C64,32 70,40 70,54 C70,68 64,76 54,76 C44,76 38,68 38,54 C38,40 44,32 54,32 Z M54,41 C50,41 47.5,45 47.5,54 C47.5,63 50,67 54,67 C58,67 60.5,63 60.5,54 C60.5,45 58,41 54,41 Z" />
+    <group android:translateX="26" android:translateY="26" android:scaleX="0.109375" android:scaleY="0.109375">
+        <path android:fillColor="#ffffff" android:pathData="M60.38 448.72C20.13 406.54 0 342.3 0 256S20.13 105.46 60.38 63.28C100.63 21.1 165.84 0 256 0c90.16 0 155.37 21.1 195.62 63.28S512 169.7 512 256s-20.13 150.54-60.38 192.72C411.37 490.9 346.16 512 256 512c-90.16 0-155.37-21.1-195.62-63.28zm147.32-267.1v189.33h29.94c23.19 0 40.1-2.41 50.72-7.24 10.63-4.83 15.94-15.94 15.94-33.33V141.05h-29.94c-23.19 0-40.1 2.4-50.72 7.24-10.63 4.83-15.94 15.94-15.94 33.33z" />
+    </group>
 </vector>
