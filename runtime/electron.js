@@ -1726,7 +1726,53 @@ async function netFetch(input, init) {
     return handler(req)
   }
   if (scheme === 'file') return fileResponse(fileURLToPath(url.replace(/[?#].*$/, '')), typeof input === 'object' && input.headers ? input : new Request('http://x/', init))
-  return fetch(input, init)
+  if (!/^https?:/i.test(url)) return fetch(input, init)
+  const req = new Request(input, init)
+  try {
+    return await fetch(req.clone())
+  } catch (err) {
+    if (err?.name === 'AbortError' || req.signal?.aborted) throw err
+    // Node could not connect (TLS, DNS, a blocked client): Android's own HTTP
+    // stack, with the system's certificates and network settings, tries again
+    try {
+      return await hostFetch(req)
+    } catch (fallbackErr) {
+      reportNetworkError(url, err)
+      console.error('net.fetch fallback', url, fallbackErr.message)
+      throw err
+    }
+  }
+}
+
+async function hostFetch(req) {
+  const headers = {}
+  req.headers.forEach((v, k) => {
+    headers[k] = v
+  })
+  const body = req.method === 'GET' || req.method === 'HEAD' ? '' : Buffer.from(await req.arrayBuffer()).toString('base64')
+  const r = await Promise.race([
+    bus.request('net.fetch', { url: req.url, method: req.method, headers, body }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 30000)),
+  ])
+  const status = r.status
+  const nullBody = status === 204 || status === 304 || req.method === 'HEAD'
+  return new Response(nullBody ? null : Buffer.from(r.body || '', 'base64'), { status, headers: r.headers || {} })
+}
+
+// GenOffice reports only "Cannot reach …"; show the underlying cause once a minute per host
+const networkErrorShown = new Map()
+function reportNetworkError(url, err) {
+  if (err?.name === 'AbortError') return
+  let host = url
+  try {
+    host = new URL(url).host
+  } catch {}
+  const now = Date.now()
+  if (now - (networkErrorShown.get(host) || 0) < 60000) return
+  networkErrorShown.set(host, now)
+  const cause = err?.cause?.code || err?.cause?.message || err?.message || String(err)
+  console.error('net.fetch', host, err?.cause || err)
+  bus?.cmd('notify', { title: 'Network error: ' + host, body: String(cause) })
 }
 
 const net = fallback(
@@ -1939,9 +1985,15 @@ function onPageMessage(wcId, msg) {
 }
 
 let pendingOpenFiles = []
+const preloadCache = new Map()
 
 function onHostEvent(msg) {
   switch (msg.type) {
+    case 'memory':
+      // Android is short of memory: give back what V8 holds but no longer uses
+      // (--expose-gc), before Android starts killing processes
+      global.gc?.()
+      break
     case 'display': {
       const darkChanged = msg.dark !== undefined && !!msg.dark !== display.dark
       Object.assign(display, {
@@ -2011,7 +2063,9 @@ function attach(theBus) {
     let preload = null
     if (wc?._preload) {
       try {
-        preload = fs.readFileSync(wc._preload, 'utf8')
+        // the payload's preload scripts do not change while it runs (re-read while developing)
+        preload = (process.env.GO_DEV !== '1' && preloadCache.get(wc._preload)) || fs.readFileSync(wc._preload, 'utf8')
+        preloadCache.set(wc._preload, preload)
       } catch (err) {
         console.error('[boot] preload', wc._preload, err.message)
       }

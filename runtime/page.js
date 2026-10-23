@@ -8,6 +8,20 @@
   if (window.__goBooted || window.top !== window) return
   window.__goBooted = true
 
+  // what gives a web page away on a touch screen, as a desktop app does not
+  // show it: the tap flash, the long-press callout, the bounce at the edges,
+  // phone-style text inflation, and dragging images and links out. :where()
+  // keeps these below any style the app sets itself.
+  const nativeFeel = document.createElement('style')
+  nativeFeel.textContent = `
+:where(html) { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; overscroll-behavior: none; }
+:where(*) { -webkit-tap-highlight-color: transparent; }
+:where(body) { -webkit-touch-callout: none; }
+:where(input, textarea, [contenteditable]:not([contenteditable="false"])) { -webkit-touch-callout: default; }
+:where(img, a) { -webkit-user-drag: none; }
+`
+  ;(document.head || document.documentElement).appendChild(nativeFeel)
+
   const codec = window.__goCodec
   const H = window.GenOfficeHost
   let wc = 0
@@ -25,6 +39,11 @@
   if (!wc) wc = boot.wc || 0
   const urls = window.__goUrlMap.make(boot.port)
   const customSchemes = new Set(boot.schemes || [])
+  // IPC and events on their own host name: Chromium allows 6 connections per
+  // host, and the event stream plus slow invokes must not hold up the page's
+  // own files (or the other way round). text/plain keeps the requests "simple",
+  // with no CORS preflight round trip.
+  const BUS = `http://ipc.localhost:${boot.port}`
   const pageId = Math.random().toString(36).slice(2) + Date.now().toString(36)
   let seq = 0
 
@@ -33,15 +52,15 @@
   }
 
   function postAsync(body) {
-    return fetch('/__go/ipc' + qs(), { method: 'POST', body, headers: { 'content-type': 'application/json' } }).then((r) =>
+    return fetch(BUS + '/__go/ipc' + qs(), { method: 'POST', body, headers: { 'content-type': 'text/plain' } }).then((r) =>
       r.json(),
     )
   }
 
   function postSync(body) {
     const x = new XMLHttpRequest()
-    x.open('POST', '/__go/ipc' + qs(), false)
-    x.setRequestHeader('content-type', 'application/json')
+    x.open('POST', BUS + '/__go/ipc' + qs(), false)
+    x.setRequestHeader('content-type', 'text/plain')
     x.send(body)
     return JSON.parse(x.responseText || '{}')
   }
@@ -284,7 +303,7 @@
     if (m.replaceWord !== undefined) replaceWord(m.replaceWord)
   }
 
-  const events = new EventSource('/__go/events' + qs('&page=' + pageId))
+  const events = new EventSource(BUS + '/__go/events' + qs('&page=' + pageId))
   events.onmessage = (e) => {
     try {
       onMessage(JSON.parse(e.data))
@@ -322,12 +341,21 @@
   window.addEventListener('focus', () => life('focus'))
   window.addEventListener('blur', () => life('blur'))
   let lastTitle = null
-  new MutationObserver(() => {
+  // watches <head> only (where <title> is): watching the whole document would
+  // run on every edit in a large editor DOM
+  const titleObserver = new MutationObserver(() => {
     if (document.title !== lastTitle) {
       lastTitle = document.title
       life('title', { title: document.title })
     }
-  }).observe(document, { subtree: true, childList: true, characterData: true })
+  })
+  const watchTitle = () => {
+    titleObserver.disconnect()
+    if (document.head) titleObserver.observe(document.head, { subtree: true, childList: true, characterData: true })
+    titleObserver.observe(document.documentElement, { childList: true })
+  }
+  if (document.documentElement) watchTitle()
+  document.addEventListener('DOMContentLoaded', watchTitle)
 
   const CODE_KEYS = {
     Equal: '=',
@@ -427,6 +455,8 @@
       type,
       (e) => {
         if (!hooked(e)) return
+        // only keyDown can be cancelled in time to matter: keyUp goes without blocking the page
+        if (name === 'keyUp') return void postAsync(message('input', { input: inputOf(e, name) })).catch(() => {})
         const r = postSync(message('input', { input: inputOf(e, name) }))
         if (r.prevented) {
           e.preventDefault()

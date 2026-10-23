@@ -154,6 +154,12 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         root = new RootLayout(this);
         root.setBackgroundColor(themeBackground());
         setContentView(root);
+        // loading Chromium's WebView takes a moment the first time: done now, on
+        // the main thread's idle time, while Node starts, not when the first page opens
+        Looper.myQueue().addIdleHandler(() -> {
+            if (webs.isEmpty()) new WebView(this).destroy();
+            return false;
+        });
         showSplash();
         WebView.setWebContentsDebuggingEnabled(true);
         paths = new Paths(this);
@@ -221,11 +227,24 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         t.setText(title);
         t.setTextSize(18);
         box.addView(t);
+        TextView hint = new TextView(this);
+        hint.setText("Restart to continue. Changes made since the last save may be lost.");
+        hint.setPadding(0, px(8), 0, px(8));
+        box.addView(hint);
         Button restart = new Button(this);
         restart.setText("Restart");
         restart.setOnClickListener(v -> relaunch());
         box.addView(restart);
+        Button more = new Button(this);
+        more.setText("Show details");
+        box.addView(more);
         TextView log = new TextView(this);
+        log.setVisibility(View.GONE);
+        more.setOnClickListener(v -> {
+            boolean show = log.getVisibility() != View.VISIBLE;
+            log.setVisibility(show ? View.VISIBLE : View.GONE);
+            more.setText(show ? "Hide details" : "Show details");
+        });
         log.setText(details);
         log.setTextIsSelectable(true);
         log.setTypeface(android.graphics.Typeface.MONOSPACE);
@@ -234,6 +253,49 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         scroll.addView(log);
         box.addView(scroll);
         root.addView(box);
+    }
+
+    private android.os.FileObserver fontsObserver;
+    private boolean fontsDialogShown;
+
+    /** GenOffice reads its fonts once, at start: a font copied into the fonts
+     * folder offers a restart (the same restart a crash uses). */
+    private void watchFonts() {
+        if (fontsObserver != null || !Paths.hasAllFiles()) return;
+        File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "GenOffice/Fonts");
+        if (!dir.isDirectory()) return;
+        fontsObserver = new android.os.FileObserver(dir, android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO) {
+            @Override
+            public void onEvent(int event, String name) {
+                if (name == null || !name.matches("(?i).+\\.(ttf|otf|ttc|otc)")) return;
+                main.post(() -> {
+                    if (fontsDialogShown || isFinishing()) return;
+                    fontsDialogShown = true;
+                    new AlertDialog.Builder(MainActivity.this)
+                            .setTitle("New font added")
+                            .setMessage(name + " can be used after GenOffice restarts. Save your work first.")
+                            .setPositiveButton("Restart now", (d, w) -> relaunch())
+                            .setNegativeButton("Later", (d, w) -> fontsDialogShown = false)
+                            .setOnCancelListener(d -> fontsDialogShown = false)
+                            .show();
+                });
+            }
+        };
+        fontsObserver.startWatching();
+    }
+
+    /** Once, when the fonts folder exists (it needs all-files access): where downloaded fonts go. */
+    private void showFontsHint() {
+        if (!Paths.hasAllFiles()) return;
+        SharedPreferences prefs = getSharedPreferences("officeport", MODE_PRIVATE);
+        if (prefs.getBoolean("shownFontsHint", false)) return;
+        prefs.edit().putBoolean("shownFontsHint", true).apply();
+        new AlertDialog.Builder(this)
+                .setTitle("Adding fonts")
+                .setMessage("GenOffice uses Android's fonts and any font you put in\n\nDocuments › GenOffice › Fonts\n\n"
+                        + "Copy downloaded .ttf, .otf or .ttc files there (not into subfolders), then close and reopen GenOffice.")
+                .setPositiveButton("OK", null)
+                .show();
     }
 
     private void askForFileAccess() {
@@ -273,6 +335,8 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
             host = new HostChannel(port, nodeToken, this);
             host.open();
             connected = true;
+            showFontsHint();
+            watchFonts();
             sendDisplay();
             for (String p : pendingOpen) host.event("open-file", "path", p);
             pendingOpen.clear();
@@ -282,9 +346,21 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
     @Override
     public void onExit(int code, String lastLines) {
         main.post(() -> {
+            boolean wasRunning = connected;
             connected = false;
             if (isFinishing()) return;
-            showFailure("GenOffice stopped (exit code " + code + ").", lastLines);
+            // a crash while in use: start again by itself, once every few minutes at
+            // most (a crash that repeats goes to the failure screen, not a loop)
+            SharedPreferences prefs = getSharedPreferences("officeport", MODE_PRIVATE);
+            long now = System.currentTimeMillis();
+            if (wasRunning && code != 0 && now - prefs.getLong("autoRestartAt", 0) > 3 * 60_000) {
+                prefs.edit().putLong("autoRestartAt", now).commit();
+                Toast.makeText(this, "GenOffice stopped unexpectedly. Restarting…", Toast.LENGTH_LONG).show();
+                relaunch();
+                return;
+            }
+            showFailure(wasRunning ? "GenOffice stopped unexpectedly." : "GenOffice could not start.",
+                    "Exit code " + code + "\n\n" + lastLines);
         });
     }
 
@@ -375,7 +451,14 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
                 case "view.attach": attachView(c); break;
                 case "view.detach": detachView(c.getInt("wc")); break;
                 case "view.bounds": viewBounds(c.getInt("wc"), c.getJSONObject("bounds")); break;
-                case "view.visible": { WebView v = webs.get(c.getInt("wc")); if (v != null) v.setVisibility(c.optBoolean("visible") ? View.VISIBLE : View.GONE); break; }
+                case "view.visible": {
+                    WebView v = webs.get(c.getInt("wc"));
+                    if (v != null) {
+                        boolean visible = c.optBoolean("visible");
+                        v.setVisibility(visible ? View.VISIBLE : View.GONE);
+                    }
+                    break;
+                }
                 case "view.background": { WebView v = webs.get(c.getInt("wc")); if (v != null) v.setBackgroundColor(parseColor(c.optString("color"), Color.TRANSPARENT)); break; }
                 case "dialog.open": openDialog(c, req); break;
                 case "dialog.save": saveDialog(c, req); break;
@@ -391,6 +474,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
                 case "app.quit": quit(); break;
                 case "app.relaunch": relaunch(); break;
                 case "theme.set": break;
+                case "net.fetch": new Thread(() -> netFetch(c, req), "net-fetch").start(); break;
                 case "spell.check": spelling.check(c.optString("word"), c.optString("language"), r -> host.reply(req, r)); break;
                 default:
                     Log.w(TAG, "unknown command " + name);
@@ -475,6 +559,11 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         s.setUserAgentString(userAgent(s));
         v.setBackgroundColor(themeBackground());
         v.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        // a visible page's renderer is as important as the app; hidden tabs' are not
+        v.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true);
+        // the page draws its own scrollbars; WebView's Android-style ones on top look like a phone browser
+        v.setVerticalScrollBarEnabled(false);
+        v.setHorizontalScrollBarEnabled(false);
         v.setFocusable(true);
         v.setFocusableInTouchMode(true);
         v.addJavascriptInterface(new PageBridge(wc), "GenOfficeHost");
@@ -490,6 +579,10 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
             v = webs.get(wc);
         }
         lastUrl.put(wc, url);
+        // hidden until the new page has painted (Client reveals it): no blank or
+        // half-drawn frame while the document loads, the way a native screen appears
+        v.animate().cancel();
+        v.setAlpha(0f);
         v.loadUrl(url);
     }
 
@@ -553,12 +646,27 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         }
 
         @Override
+        public void onPageCommitVisible(WebView view, String url) {
+            reveal(view);
+        }
+
+        @Override
+        public void onPageFinished(WebView view, String url) {
+            reveal(view);
+        }
+
+        private void reveal(WebView view) {
+            if (view.getAlpha() < 1f && view.animate() != null) view.animate().alpha(1f).setDuration(120).start();
+        }
+
+        @Override
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
             if (host != null) host.event("wc", "wc", wc, "name", "did-navigate", "url", url);
         }
 
         @Override
         public void onReceivedError(WebView view, WebResourceRequest r, android.webkit.WebResourceError error) {
+            if (r.isForMainFrame()) view.setAlpha(1f);
             if (r.isForMainFrame() && host != null) {
                 host.event("wc", "wc", wc, "name", "did-fail-load", "code", error.getErrorCode(), "description", String.valueOf(error.getDescription()), "url", r.getUrl().toString());
             }
@@ -1190,6 +1298,59 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         }
     }
 
+    /** A request Node could not make itself (runtime/electron.js hostFetch), on Android's HTTP stack. */
+    private void netFetch(JSONObject c, int req) {
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new java.net.URL(c.getString("url")).openConnection();
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(30000);
+            conn.setInstanceFollowRedirects(true);
+            conn.setRequestMethod(c.optString("method", "GET"));
+            JSONObject headers = c.optJSONObject("headers");
+            if (headers != null) {
+                for (java.util.Iterator<String> it = headers.keys(); it.hasNext(); ) {
+                    String k = it.next();
+                    if (!k.equalsIgnoreCase("content-length") && !k.equalsIgnoreCase("host")) conn.setRequestProperty(k, headers.getString(k));
+                }
+            }
+            String body = c.optString("body");
+            if (!body.isEmpty()) {
+                byte[] bytes = Base64.decode(body, Base64.DEFAULT);
+                conn.setDoOutput(true);
+                conn.setFixedLengthStreamingMode(bytes.length);
+                try (java.io.OutputStream os = conn.getOutputStream()) {
+                    os.write(bytes);
+                }
+            }
+            int status = conn.getResponseCode();
+            JSONObject outHeaders = new JSONObject();
+            for (Map.Entry<String, List<String>> e : conn.getHeaderFields().entrySet()) {
+                // the body arrives decoded and whole
+                if (e.getKey() == null || e.getKey().equalsIgnoreCase("content-encoding") || e.getKey().equalsIgnoreCase("content-length") || e.getKey().equalsIgnoreCase("transfer-encoding")) continue;
+                outHeaders.put(e.getKey().toLowerCase(Locale.ROOT), android.text.TextUtils.join(", ", e.getValue()));
+            }
+            InputStream in = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            ByteArrayOutputStream buf = new ByteArrayOutputStream();
+            if (in != null) {
+                try (InputStream is = in) {
+                    byte[] b = new byte[16384];
+                    for (int n; (n = is.read(b)) > 0; ) {
+                        buf.write(b, 0, n);
+                        if (buf.size() > (32 << 20)) throw new java.io.IOException("response over 32 MB");
+                    }
+                }
+            }
+            JSONObject r = new JSONObject().put("status", status).put("headers", outHeaders)
+                    .put("body", Base64.encodeToString(buf.toByteArray(), Base64.NO_WRAP));
+            if (host != null) host.reply(req, r);
+        } catch (Exception e) {
+            if (host != null) host.fail(req, String.valueOf(e));
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
     private String openPath(String path) {
         File f = new File(path);
         if (!f.exists()) return "not found: " + path;
@@ -1255,6 +1416,16 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
     }
 
     @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        // in the background, or critically short of memory in the foreground: Node
+        // collects garbage (a full collection pauses it, so not on milder warnings)
+        if (host != null && connected && level >= TRIM_MEMORY_RUNNING_CRITICAL) {
+            host.event("memory", "level", level);
+        }
+    }
+
+    @Override
     protected void onDestroy() {
         if (isFinishing()) {
             if (host != null) host.close();
@@ -1263,6 +1434,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         for (WebView v : webs.values()) v.destroy();
         webs.clear();
         if (spelling != null) spelling.close();
+        if (fontsObserver != null) fontsObserver.stopWatching();
         super.onDestroy();
     }
 }

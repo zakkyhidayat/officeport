@@ -16,6 +16,9 @@ const codec = require('./codec')
 const RUNTIME = __dirname
 const TOKEN = process.env.GO_TOKEN || crypto.randomBytes(16).toString('hex')
 const DEV = process.env.GO_DEV === '1'
+const STAMP = (process.env.GO_STAMP || '').replace(/[^\w.-]/g, '')
+const HASHED_ASSET = /\/assets\/[^/]+-[A-Za-z0-9_-]{8}\.(?:m?js|css|woff2?|ttf|otf|wasm|svg|png|jpe?g|webp|avif)$/
+const STATIC_TYPE = /^(text\/javascript|text\/css|font\/|application\/wasm)/
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -98,6 +101,14 @@ function injectPage(html) {
   return PAGE_SCRIPT + html
 }
 
+let pageScriptCache = null
+/** What every page runs first; read once (on every request while developing). */
+function pageScript() {
+  if (pageScriptCache && !DEV) return pageScriptCache
+  pageScriptCache = ['codec.js', 'urlmap.js', 'page.js'].map((f) => fs.readFileSync(path.join(RUNTIME, f), 'utf8')).join('\n')
+  return pageScriptCache
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = []
@@ -115,9 +126,11 @@ function sendJson(res, value, status = 200) {
 
 /** An event stream (SSE): queued while no client is connected. */
 class Stream {
-  constructor() {
+  /** limit: messages kept while no client is connected (oldest go first) */
+  constructor(limit = Infinity) {
     this.res = null
     this.queue = []
+    this.limit = limit
   }
   attach(res) {
     if (this.res) this.res.end()
@@ -139,7 +152,10 @@ class Stream {
   push(message) {
     const line = `data: ${JSON.stringify(message)}\n\n`
     if (this.res && !this.res.writableEnded) this.res.write(line)
-    else this.queue.push(message)
+    else {
+      this.queue.push(message)
+      if (this.queue.length > this.limit) this.queue.splice(0, this.queue.length - this.limit)
+    }
   }
   reset() {
     this.queue = []
@@ -164,7 +180,8 @@ class Bus {
   }
 
   start() {
-    const server = http.createServer((req, res) => {
+    // small IPC replies go out at once, not held back by Nagle's algorithm
+    const server = http.createServer({ noDelay: true }, (req, res) => {
       this.route(req, res).catch((err) => {
         console.error('[bus]', req.method, req.url, err)
         if (!res.headersSent) res.writeHead(500)
@@ -172,12 +189,21 @@ class Bus {
       })
     })
     server.keepAliveTimeout = 60_000
-    return new Promise((resolve) => {
-      server.listen(Number(process.env.GO_PORT || 0), '127.0.0.1', () => {
+    return new Promise((resolve, reject) => {
+      const listen = (port) => server.listen(port, '127.0.0.1')
+      server.once('listening', () => {
         this.port = server.address().port
         this.urls = require('./urlmap').make(this.port)
         resolve(this.port)
       })
+      server.on('error', (err) => {
+        // the usual port is taken: any free one (pages then start with a fresh cache)
+        if (err.code === 'EADDRINUSE' && server.address() === null && !this.port) {
+          console.error('[bus] port in use, picking another')
+          listen(0)
+        } else reject(err)
+      })
+      listen(Number(process.env.GO_PORT || 0))
     })
   }
 
@@ -219,7 +245,8 @@ class Bus {
   page(wcId) {
     let p = this.pages.get(wcId)
     if (!p) {
-      p = { stream: new Stream(), seq: 0, pageId: null, waiters: [], execSeq: 0, execs: new Map() }
+      // a page that never connects (stuck or gone) cannot hold messages without bound
+      p = { stream: new Stream(5000), seq: 0, pageId: null, waiters: [], execSeq: 0, execs: new Map() }
       this.pages.set(wcId, p)
     }
     return p
@@ -236,12 +263,22 @@ class Bus {
     p.pageId = null
     for (const w of p.waiters) w()
     p.waiters = []
+    this.failExecs(p, 'page navigated away')
   }
 
   dropPage(wcId) {
     const p = this.pages.get(wcId)
-    if (p?.stream.res) p.stream.res.end()
+    if (!p) return
+    if (p.stream.res) p.stream.res.end()
+    this.failExecs(p, 'page destroyed')
     this.pages.delete(wcId)
+  }
+
+  /** executeJavaScript calls the old document will never answer: settle
+   * them, or their callers wait forever. */
+  failExecs(p, reason) {
+    for (const e of p.execs.values()) e.reject(new Error(`executeJavaScript: ${reason}`))
+    p.execs.clear()
   }
 
   execInPage(wcId, code) {
@@ -262,7 +299,9 @@ class Bus {
         p.pageId = msg.page
         p.seq = msg.seq - 1
       }
-      const deadline = Date.now() + 1000
+      // keys are answered at once: the page is blocked on them (synchronous
+      // XHR) and must not wait for a large message still on its way
+      const deadline = msg.kind === 'input' ? 0 : Date.now() + 1000
       while (msg.seq > p.seq + 1 && Date.now() < deadline) {
         await new Promise((resolve) => {
           p.waiters.push(resolve)
@@ -317,12 +356,7 @@ class Bus {
   async routeBus(req, res, url) {
     const p = url.pathname
     if (p === '/__go/page.js') {
-      const body =
-        fs.readFileSync(path.join(RUNTIME, 'codec.js'), 'utf8') +
-        '\n' +
-        fs.readFileSync(path.join(RUNTIME, 'urlmap.js'), 'utf8') +
-        '\n' +
-        fs.readFileSync(path.join(RUNTIME, 'page.js'), 'utf8')
+      const body = pageScript()
       res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' })
       return res.end(body)
     }
@@ -403,9 +437,27 @@ class Bus {
       out[k] = v
     })
     out['access-control-allow-origin'] = '*'
-    out['cache-control'] = out['cache-control'] || 'no-cache'
     const type = (out['content-type'] || (scheme === 'file' ? '' : mimeOf(new URL(original).pathname)) || '').toLowerCase()
     if (!out['content-type'] && type) out['content-type'] = type
+    if (!out['cache-control'] && req.method === 'GET' && response.status === 200 && HASHED_ASSET.test(new URL(original).pathname)) {
+      // a bundler's content-hashed file (assets/index-CZcbSwjT.js) never changes
+      // under its name: the WebView keeps it without asking again
+      out['cache-control'] = 'max-age=31536000, immutable'
+    }
+    if (!out['cache-control'] && STAMP && req.method === 'GET' && response.status === 200 && STATIC_TYPE.test(type)) {
+      // GenOffice's own scripts, styles, fonts and wasm change only with the
+      // payload: revalidated against its version, answered 304 when current
+      const etag = `"go-${STAMP}"`
+      out['cache-control'] = 'no-cache'
+      out.etag = etag
+      if (req.headers['if-none-match'] === etag) {
+        await response.body?.cancel()
+        delete out['content-length']
+        res.writeHead(304, out)
+        return res.end()
+      }
+    }
+    out['cache-control'] = out['cache-control'] || 'no-cache'
     const isDocument = (req.headers['sec-fetch-dest'] || 'document') === 'document'
     if (isDocument && type.startsWith('text/html') && response.status === 200) {
       const html = injectPage(await response.text())
@@ -415,9 +467,10 @@ class Bus {
     }
     res.writeHead(response.status, out)
     if (!response.body || req.method === 'HEAD') return res.end()
-    Readable.fromWeb(response.body)
-      .on('error', () => res.destroy())
-      .pipe(res)
+    const body = Readable.fromWeb(response.body)
+    // a request the WebView gave up on (seeking a video, closing a tab) stops reading too
+    res.on('close', () => body.destroy())
+    body.on('error', () => res.destroy()).pipe(res)
   }
 }
 

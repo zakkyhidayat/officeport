@@ -33,6 +33,7 @@ final class HostChannel {
     private final Commands commands;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService out = Executors.newSingleThreadExecutor();
+    private final java.util.concurrent.ConcurrentLinkedQueue<JSONObject> outbox = new java.util.concurrent.ConcurrentLinkedQueue<>();
     private volatile boolean closed;
 
     HostChannel(int port, String token, Commands commands) {
@@ -83,15 +84,21 @@ final class HostChannel {
         }
     }
 
+    /** Queues a message; whatever is queued when the sender gets to it goes
+     * in one POST (bus.js takes an array), in order. */
     void send(final JSONObject message) {
         if (closed) return;
+        outbox.add(message);
         out.execute(() -> {
+            org.json.JSONArray batch = new org.json.JSONArray();
+            for (JSONObject m; (m = outbox.poll()) != null; ) batch.put(m);
+            if (batch.length() == 0) return;
             try {
                 HttpURLConnection c = (HttpURLConnection) new URL(base() + "/__go/host/msg?token=" + token).openConnection();
                 c.setRequestMethod("POST");
                 c.setDoOutput(true);
                 c.setRequestProperty("content-type", "application/json");
-                byte[] body = message.toString().getBytes(StandardCharsets.UTF_8);
+                byte[] body = batch.toString().getBytes(StandardCharsets.UTF_8);
                 c.setFixedLengthStreamingMode(body.length);
                 try (OutputStream os = c.getOutputStream()) {
                     os.write(body);
