@@ -227,11 +227,24 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         t.setText(title);
         t.setTextSize(18);
         box.addView(t);
+        TextView hint = new TextView(this);
+        hint.setText("Restart to continue. Changes made since the last save may be lost.");
+        hint.setPadding(0, px(8), 0, px(8));
+        box.addView(hint);
         Button restart = new Button(this);
         restart.setText("Restart");
         restart.setOnClickListener(v -> relaunch());
         box.addView(restart);
+        Button more = new Button(this);
+        more.setText("Show details");
+        box.addView(more);
         TextView log = new TextView(this);
+        log.setVisibility(View.GONE);
+        more.setOnClickListener(v -> {
+            boolean show = log.getVisibility() != View.VISIBLE;
+            log.setVisibility(show ? View.VISIBLE : View.GONE);
+            more.setText(show ? "Hide details" : "Show details");
+        });
         log.setText(details);
         log.setTextIsSelectable(true);
         log.setTypeface(android.graphics.Typeface.MONOSPACE);
@@ -303,9 +316,21 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
     @Override
     public void onExit(int code, String lastLines) {
         main.post(() -> {
+            boolean wasRunning = connected;
             connected = false;
             if (isFinishing()) return;
-            showFailure("GenOffice stopped (exit code " + code + ").", lastLines);
+            // a crash while in use: start again by itself, once every few minutes at
+            // most (a crash that repeats goes to the failure screen, not a loop)
+            SharedPreferences prefs = getSharedPreferences("officeport", MODE_PRIVATE);
+            long now = System.currentTimeMillis();
+            if (wasRunning && code != 0 && now - prefs.getLong("autoRestartAt", 0) > 3 * 60_000) {
+                prefs.edit().putLong("autoRestartAt", now).commit();
+                Toast.makeText(this, "GenOffice stopped unexpectedly. Restarting…", Toast.LENGTH_LONG).show();
+                relaunch();
+                return;
+            }
+            showFailure(wasRunning ? "GenOffice stopped unexpectedly." : "GenOffice could not start.",
+                    "Exit code " + code + "\n\n" + lastLines);
         });
     }
 

@@ -126,9 +126,11 @@ function sendJson(res, value, status = 200) {
 
 /** An event stream (SSE): queued while no client is connected. */
 class Stream {
-  constructor() {
+  /** limit: messages kept while no client is connected (oldest go first) */
+  constructor(limit = Infinity) {
     this.res = null
     this.queue = []
+    this.limit = limit
   }
   attach(res) {
     if (this.res) this.res.end()
@@ -150,7 +152,10 @@ class Stream {
   push(message) {
     const line = `data: ${JSON.stringify(message)}\n\n`
     if (this.res && !this.res.writableEnded) this.res.write(line)
-    else this.queue.push(message)
+    else {
+      this.queue.push(message)
+      if (this.queue.length > this.limit) this.queue.splice(0, this.queue.length - this.limit)
+    }
   }
   reset() {
     this.queue = []
@@ -240,7 +245,8 @@ class Bus {
   page(wcId) {
     let p = this.pages.get(wcId)
     if (!p) {
-      p = { stream: new Stream(), seq: 0, pageId: null, waiters: [], execSeq: 0, execs: new Map() }
+      // a page that never connects (stuck or gone) cannot hold messages without bound
+      p = { stream: new Stream(5000), seq: 0, pageId: null, waiters: [], execSeq: 0, execs: new Map() }
       this.pages.set(wcId, p)
     }
     return p
