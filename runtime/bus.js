@@ -255,12 +255,22 @@ class Bus {
     p.pageId = null
     for (const w of p.waiters) w()
     p.waiters = []
+    this.failExecs(p, 'page navigated away')
   }
 
   dropPage(wcId) {
     const p = this.pages.get(wcId)
-    if (p?.stream.res) p.stream.res.end()
+    if (!p) return
+    if (p.stream.res) p.stream.res.end()
+    this.failExecs(p, 'page destroyed')
     this.pages.delete(wcId)
+  }
+
+  /** executeJavaScript calls the old document will never answer: settle
+   * them, or their callers wait forever. */
+  failExecs(p, reason) {
+    for (const e of p.execs.values()) e.reject(new Error(`executeJavaScript: ${reason}`))
+    p.execs.clear()
   }
 
   execInPage(wcId, code) {
@@ -444,9 +454,10 @@ class Bus {
     }
     res.writeHead(response.status, out)
     if (!response.body || req.method === 'HEAD') return res.end()
-    Readable.fromWeb(response.body)
-      .on('error', () => res.destroy())
-      .pipe(res)
+    const body = Readable.fromWeb(response.body)
+    // a request the WebView gave up on (seeking a video, closing a tab) stops reading too
+    res.on('close', () => body.destroy())
+    body.on('error', () => res.destroy()).pipe(res)
   }
 }
 

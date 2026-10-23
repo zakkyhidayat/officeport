@@ -1958,9 +1958,15 @@ function onPageMessage(wcId, msg) {
 }
 
 let pendingOpenFiles = []
+const preloadCache = new Map()
 
 function onHostEvent(msg) {
   switch (msg.type) {
+    case 'memory':
+      // Android is short of memory: give back what V8 holds but no longer uses
+      // (--expose-gc), before Android starts killing processes
+      global.gc?.()
+      break
     case 'display': {
       const darkChanged = msg.dark !== undefined && !!msg.dark !== display.dark
       Object.assign(display, {
@@ -2030,7 +2036,9 @@ function attach(theBus) {
     let preload = null
     if (wc?._preload) {
       try {
-        preload = fs.readFileSync(wc._preload, 'utf8')
+        // the payload's preload scripts do not change while it runs (re-read while developing)
+        preload = (process.env.GO_DEV !== '1' && preloadCache.get(wc._preload)) || fs.readFileSync(wc._preload, 'utf8')
+        preloadCache.set(wc._preload, preload)
       } catch (err) {
         console.error('[boot] preload', wc._preload, err.message)
       }

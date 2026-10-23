@@ -1264,6 +1264,15 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
     }
 
     @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        // in the background, or short of memory in the foreground: Node collects garbage
+        if (host != null && connected && level >= TRIM_MEMORY_RUNNING_LOW) {
+            host.event("memory", "level", level);
+        }
+    }
+
+    @Override
     protected void onDestroy() {
         if (isFinishing()) {
             if (host != null) host.close();

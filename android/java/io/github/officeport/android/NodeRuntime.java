@@ -137,6 +137,7 @@ final class NodeRuntime {
                 libDir + "/libgonode.so",
                 "--max-old-space-size=" + heapMb(),
                 "--disable-warning=ExperimentalWarning",
+                "--expose-gc",
                 new File(root(), "runtime/main.js").getPath());
         pb.directory(home);
         pb.redirectErrorStream(true);
