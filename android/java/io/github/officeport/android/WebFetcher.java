@@ -35,7 +35,12 @@ final class WebFetcher {
         void done(JSONObject response, String error);
     }
 
-    private final Context context;
+    private final android.app.Activity context;
+    /** the user agent the app's own pages send (a desktop Chrome's, not WebView's "; wv") */
+    String userAgent;
+    private android.app.AlertDialog shown;
+    /** set when the user cancels the check: what the requests waiting for it get */
+    private String failReason;
     private final Handler main = new Handler(Looper.getMainLooper());
     private WebView view;
     private String origin;
@@ -44,7 +49,7 @@ final class WebFetcher {
     private final Map<Integer, Result> pending = new HashMap<>();
     private int seq;
 
-    WebFetcher(Context context) {
+    WebFetcher(android.app.Activity context) {
         this.context = context;
     }
 
@@ -67,10 +72,12 @@ final class WebFetcher {
         if (view != null) view.destroy();
         origin = o;
         ready = false;
+        failReason = null;
         view = new WebView(context);
         WebSettings s = view.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
+        if (userAgent != null) s.setUserAgentString(userAgent);
         CookieManager.getInstance().setAcceptThirdPartyCookies(view, true);
         view.addJavascriptInterface(new Bridge(), "OfficeportFetch");
         view.setWebViewClient(new WebViewClient() {
@@ -79,8 +86,17 @@ final class WebFetcher {
                 if (v != view) return;
                 // a CDN challenge page finishes too, then moves on to the real one
                 v.evaluateJavascript("document.title", title -> {
-                    if (title != null && title.toLowerCase().contains("just a moment")) return;
+                    if (title != null && title.toLowerCase().contains("just a moment")) {
+                        // most challenges pass by themselves; one that waits for a
+                        // person ("verify you are human") is shown to the user
+                        main.postDelayed(() -> showIfStillChallenged(v), 5000);
+                        return;
+                    }
                     ready = true;
+                    if (shown != null) {
+                        shown.dismiss();
+                        shown = null;
+                    }
                     List<Runnable> runs = new ArrayList<>(waiting);
                     waiting.clear();
                     for (Runnable r : runs) r.run();
@@ -91,7 +107,38 @@ final class WebFetcher {
         view.loadUrl(o + "/robots.txt");
     }
 
+    private void showIfStillChallenged(WebView v) {
+        if (v != view || ready || shown != null || context.isFinishing()) return;
+        if (v.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) v.getParent()).removeView(v);
+        android.widget.FrameLayout box = new android.widget.FrameLayout(context);
+        int px = (int) (420 * context.getResources().getDisplayMetrics().density);
+        box.addView(v, new android.widget.FrameLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, px));
+        shown = new android.app.AlertDialog.Builder(context)
+                .setTitle("Check by " + android.net.Uri.parse(origin).getHost())
+                .setView(box)
+                .setNegativeButton("Cancel", (d, w) -> cancelAll("check cancelled"))
+                .setOnCancelListener(d -> cancelAll("check cancelled"))
+                .show();
+    }
+
+    private void cancelAll(String why) {
+        shown = null;
+        if (view != null && view.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) view.getParent()).removeView(view);
+        for (Result r : new ArrayList<>(pending.values())) r.done(null, why);
+        pending.clear();
+        // the requests still waiting for the page get the same answer
+        failReason = why;
+        List<Runnable> runs = new ArrayList<>(waiting);
+        waiting.clear();
+        for (Runnable r : runs) r.run();
+        close();
+    }
+
     private void run(JSONObject req, Result result) {
+        if (failReason != null) {
+            result.done(null, failReason);
+            return;
+        }
         final int id = ++seq;
         pending.put(id, result);
         main.postDelayed(() -> {

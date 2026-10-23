@@ -189,6 +189,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
                 env.put("GO_TOKEN", token);
                 // Node's requests say what Electron's would: the browser's user agent
                 env.put("GO_UA", desktopUserAgent(WebSettings.getDefaultUserAgent(this)));
+                webFetcher.userAgent = desktopUserAgent(WebSettings.getDefaultUserAgent(this));
                 env.put("GO_WIDTH", Integer.toString(dp(root.getWidth() > 0 ? root.getWidth() : getResources().getDisplayMetrics().widthPixels)));
                 env.put("GO_HEIGHT", Integer.toString(dp(root.getHeight() > 0 ? root.getHeight() : getResources().getDisplayMetrics().heightPixels)));
                 env.put("GO_SCALE", Float.toString(density));
@@ -548,7 +549,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
     }
 
     /** Desktop Electron's user agent, on WebView's Chrome version. */
-    private static String desktopUserAgent(String def) {
+    static String desktopUserAgent(String def) {
         java.util.regex.Matcher m = java.util.regex.Pattern.compile("Chrome/([\\d.]+)").matcher(def);
         String chrome = m.find() ? m.group(1) : "130.0.0.0";
         String arch = Build.SUPPORTED_ABIS[0].startsWith("arm") ? "aarch64" : "x86_64";
