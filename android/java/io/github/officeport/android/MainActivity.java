@@ -154,6 +154,12 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         root = new RootLayout(this);
         root.setBackgroundColor(themeBackground());
         setContentView(root);
+        // loading Chromium's WebView takes a moment the first time: done now, on
+        // the main thread's idle time, while Node starts, not when the first page opens
+        Looper.myQueue().addIdleHandler(() -> {
+            if (webs.isEmpty()) new WebView(this).destroy();
+            return false;
+        });
         showSplash();
         WebView.setWebContentsDebuggingEnabled(true);
         paths = new Paths(this);
@@ -380,8 +386,6 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
                     if (v != null) {
                         boolean visible = c.optBoolean("visible");
                         v.setVisibility(visible ? View.VISIBLE : View.GONE);
-                        // hidden tabs give back their pre-rastered tiles
-                        v.getSettings().setOffscreenPreRaster(visible);
                     }
                     break;
                 }
@@ -485,6 +489,8 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         s.setUserAgentString(userAgent(s));
         v.setBackgroundColor(themeBackground());
         v.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        // a visible page's renderer is as important as the app; hidden tabs' are not
+        v.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true);
         // the page draws its own scrollbars; WebView's Android-style ones on top look like a phone browser
         v.setVerticalScrollBarEnabled(false);
         v.setHorizontalScrollBarEnabled(false);

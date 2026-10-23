@@ -17,6 +17,7 @@ const RUNTIME = __dirname
 const TOKEN = process.env.GO_TOKEN || crypto.randomBytes(16).toString('hex')
 const DEV = process.env.GO_DEV === '1'
 const STAMP = (process.env.GO_STAMP || '').replace(/[^\w.-]/g, '')
+const HASHED_ASSET = /\/assets\/[^/]+-[A-Za-z0-9_-]{8}\.(?:m?js|css|woff2?|ttf|otf|wasm|svg|png|jpe?g|webp|avif)$/
 const STATIC_TYPE = /^(text\/javascript|text\/css|font\/|application\/wasm)/
 
 const MIME = {
@@ -432,6 +433,11 @@ class Bus {
     out['access-control-allow-origin'] = '*'
     const type = (out['content-type'] || (scheme === 'file' ? '' : mimeOf(new URL(original).pathname)) || '').toLowerCase()
     if (!out['content-type'] && type) out['content-type'] = type
+    if (!out['cache-control'] && req.method === 'GET' && response.status === 200 && HASHED_ASSET.test(new URL(original).pathname)) {
+      // a bundler's content-hashed file (assets/index-CZcbSwjT.js) never changes
+      // under its name: the WebView keeps it without asking again
+      out['cache-control'] = 'max-age=31536000, immutable'
+    }
     if (!out['cache-control'] && STAMP && req.method === 'GET' && response.status === 200 && STATIC_TYPE.test(type)) {
       // GenOffice's own scripts, styles, fonts and wasm change only with the
       // payload: revalidated against its version, answered 304 when current
