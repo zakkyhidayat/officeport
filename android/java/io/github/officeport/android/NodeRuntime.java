@@ -35,6 +35,7 @@ final class NodeRuntime {
     private final Context context;
     private final Listener listener;
     private Process process;
+    private String stamp = "";
     private final StringBuilder tail = new StringBuilder();
 
     NodeRuntime(Context context, Listener listener) {
@@ -53,7 +54,6 @@ final class NodeRuntime {
     /** Unpacks assets/payload.zip unless this version already did. */
     void unpack() throws IOException {
         AssetManager assets = context.getAssets();
-        String stamp;
         try (InputStream in = assets.open("payload.stamp")) {
             stamp = new String(readAll(in), StandardCharsets.UTF_8).trim();
         }
@@ -135,7 +135,7 @@ final class NodeRuntime {
         tmp.mkdirs();
         ProcessBuilder pb = new ProcessBuilder(
                 libDir + "/libgonode.so",
-                "--max-old-space-size=3072",
+                "--max-old-space-size=" + heapMb(),
                 "--disable-warning=ExperimentalWarning",
                 new File(root(), "runtime/main.js").getPath());
         pb.directory(home);
@@ -147,6 +147,11 @@ final class NodeRuntime {
         env.put("GO_RES", resources().getPath());
         env.put("GO_DATA", data.getPath());
         env.put("NODE_OPTIONS", "");
+        // the same port on every launch keeps the pages' origins, so WebView's
+        // cache and storage carry over; one per Android user (40000-49999)
+        env.put("GO_PORT", Integer.toString(40000 + android.os.Process.myUid() % 10000));
+        // the payload's version: bus.js tags GenOffice's static files with it
+        env.put("GO_STAMP", stamp);
         // V8 code cache for GenOffice's large main bundle: later launches skip most compiling
         env.put("NODE_COMPILE_CACHE", new File(context.getCacheDir(), "node-compile-cache").getPath());
         File certs = writeCaCerts();
@@ -193,6 +198,15 @@ final class NodeRuntime {
         }
         if (code != 0) last += "\n" + diagnose();
         listener.onExit(code, last);
+    }
+
+    /** Node's heap limit: a quarter of the device's memory, 1-3 GB. */
+    private int heapMb() {
+        android.app.ActivityManager am = (android.app.ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
+        am.getMemoryInfo(mi);
+        long mb = mi.totalMem / (4L << 20);
+        return (int) Math.max(1024, Math.min(3072, mb));
     }
 
     /** Android's trusted CAs (system and user-installed) as a PEM bundle. */

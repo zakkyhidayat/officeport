@@ -16,6 +16,8 @@ const codec = require('./codec')
 const RUNTIME = __dirname
 const TOKEN = process.env.GO_TOKEN || crypto.randomBytes(16).toString('hex')
 const DEV = process.env.GO_DEV === '1'
+const STAMP = (process.env.GO_STAMP || '').replace(/[^\w.-]/g, '')
+const STATIC_TYPE = /^(text\/javascript|text\/css|font\/|application\/wasm)/
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -180,12 +182,21 @@ class Bus {
       })
     })
     server.keepAliveTimeout = 60_000
-    return new Promise((resolve) => {
-      server.listen(Number(process.env.GO_PORT || 0), '127.0.0.1', () => {
+    return new Promise((resolve, reject) => {
+      const listen = (port) => server.listen(port, '127.0.0.1')
+      server.once('listening', () => {
         this.port = server.address().port
         this.urls = require('./urlmap').make(this.port)
         resolve(this.port)
       })
+      server.on('error', (err) => {
+        // the usual port is taken: any free one (pages then start with a fresh cache)
+        if (err.code === 'EADDRINUSE' && server.address() === null && !this.port) {
+          console.error('[bus] port in use, picking another')
+          listen(0)
+        } else reject(err)
+      })
+      listen(Number(process.env.GO_PORT || 0))
     })
   }
 
@@ -406,9 +417,22 @@ class Bus {
       out[k] = v
     })
     out['access-control-allow-origin'] = '*'
-    out['cache-control'] = out['cache-control'] || 'no-cache'
     const type = (out['content-type'] || (scheme === 'file' ? '' : mimeOf(new URL(original).pathname)) || '').toLowerCase()
     if (!out['content-type'] && type) out['content-type'] = type
+    if (!out['cache-control'] && STAMP && req.method === 'GET' && response.status === 200 && STATIC_TYPE.test(type)) {
+      // GenOffice's own scripts, styles, fonts and wasm change only with the
+      // payload: revalidated against its version, answered 304 when current
+      const etag = `"go-${STAMP}"`
+      out['cache-control'] = 'no-cache'
+      out.etag = etag
+      if (req.headers['if-none-match'] === etag) {
+        await response.body?.cancel()
+        delete out['content-length']
+        res.writeHead(304, out)
+        return res.end()
+      }
+    }
+    out['cache-control'] = out['cache-control'] || 'no-cache'
     const isDocument = (req.headers['sec-fetch-dest'] || 'document') === 'document'
     if (isDocument && type.startsWith('text/html') && response.status === 200) {
       const html = injectPage(await response.text())

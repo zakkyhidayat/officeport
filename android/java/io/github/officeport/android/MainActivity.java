@@ -375,7 +375,16 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
                 case "view.attach": attachView(c); break;
                 case "view.detach": detachView(c.getInt("wc")); break;
                 case "view.bounds": viewBounds(c.getInt("wc"), c.getJSONObject("bounds")); break;
-                case "view.visible": { WebView v = webs.get(c.getInt("wc")); if (v != null) v.setVisibility(c.optBoolean("visible") ? View.VISIBLE : View.GONE); break; }
+                case "view.visible": {
+                    WebView v = webs.get(c.getInt("wc"));
+                    if (v != null) {
+                        boolean visible = c.optBoolean("visible");
+                        v.setVisibility(visible ? View.VISIBLE : View.GONE);
+                        // hidden tabs give back their pre-rastered tiles
+                        v.getSettings().setOffscreenPreRaster(visible);
+                    }
+                    break;
+                }
                 case "view.background": { WebView v = webs.get(c.getInt("wc")); if (v != null) v.setBackgroundColor(parseColor(c.optString("color"), Color.TRANSPARENT)); break; }
                 case "dialog.open": openDialog(c, req); break;
                 case "dialog.save": saveDialog(c, req); break;
