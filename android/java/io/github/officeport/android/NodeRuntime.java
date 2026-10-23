@@ -183,7 +183,70 @@ final class NodeRuntime {
         synchronized (tail) {
             last = tail.toString();
         }
+        if (code != 0) last += "\n" + diagnose();
         listener.onExit(code, last);
+    }
+
+    /** After a crash: device facts and the exit codes of stripped-down Node
+     * runs, to tell a broken binary from a crash in GenOffice's code. */
+    String diagnose() {
+        String libDir = context.getApplicationInfo().nativeLibraryDir;
+        String node = libDir + "/libgonode.so";
+        StringBuilder s = new StringBuilder("--- diagnostics ---\n");
+        s.append("android ").append(android.os.Build.VERSION.RELEASE)
+                .append(" sdk ").append(android.os.Build.VERSION.SDK_INT)
+                .append(", ").append(android.os.Build.MANUFACTURER).append(' ').append(android.os.Build.MODEL).append('\n');
+        s.append("abis ").append(String.join(",", android.os.Build.SUPPORTED_ABIS)).append('\n');
+        s.append("uid ").append(android.os.Process.myUid())
+                .append(" user ").append(android.os.Process.myUid() / 100000).append('\n');
+        s.append("data ").append(context.getApplicationInfo().dataDir).append('\n');
+        s.append("lib ").append(libDir).append('\n');
+        try {
+            s.append("page ").append(Os.sysconf(android.system.OsConstants._SC_PAGESIZE)).append('\n');
+        } catch (Exception e) {
+            s.append("page ? ").append(e).append('\n');
+        }
+        String[] files = new File(libDir).list();
+        s.append("libs ").append(files == null ? "none" : String.join(",", files)).append('\n');
+        String[][] probes = {
+                {node, "--version"},
+                {node, "-e", "console.log(process.arch, process.versions.v8)"},
+                {node, "--jitless", "-e", "console.log('jitless ok')"},
+                {node, "-e", "require('crypto').randomBytes(8);require('zlib').gzipSync('x');console.log('crypto zlib ok')"},
+        };
+        for (String[] probe : probes) {
+            s.append("$ ").append(String.join(" ", probe).replace(libDir + "/", "")).append('\n');
+            s.append(probe(probe, libDir)).append('\n');
+        }
+        return s.toString();
+    }
+
+    private String probe(String[] cmd, String libDir) {
+        try {
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            pb.redirectErrorStream(true);
+            File log = new File(context.getCacheDir(), "probe.log");
+            pb.redirectOutput(log);
+            File tmp = new File(context.getCacheDir(), "tmp");
+            tmp.mkdirs();
+            pb.directory(tmp);
+            Map<String, String> env = pb.environment();
+            env.put("LD_LIBRARY_PATH", libDir);
+            env.put("HOME", tmp.getPath());
+            env.put("TMPDIR", tmp.getPath());
+            env.put("NODE_OPTIONS", "");
+            Process p = pb.start();
+            p.getOutputStream().close();
+            if (!p.waitFor(20, java.util.concurrent.TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                return "  (timeout)";
+            }
+            String text = new String(java.nio.file.Files.readAllBytes(log.toPath()), StandardCharsets.UTF_8).trim();
+            if (text.length() > 400) text = text.substring(text.length() - 400);
+            return "  exit " + p.exitValue() + (text.isEmpty() ? "" : "\n  " + text.replace("\n", "\n  "));
+        } catch (Exception e) {
+            return "  " + e;
+        }
     }
 
     void stop() {
