@@ -135,6 +135,7 @@ final class NodeRuntime {
         File tmp = new File(context.getCacheDir(), "tmp");
         home.mkdirs();
         tmp.mkdirs();
+        linkFonts(new File(home, ".fonts"));
         java.util.List<String> cmd = new java.util.ArrayList<>(java.util.Arrays.asList(
                 libDir + "/libgonode.so",
                 "--max-old-space-size=" + heapMb(),
@@ -231,6 +232,42 @@ final class NodeRuntime {
 
     private boolean jitless() {
         return prefs().getBoolean("jitless", false);
+    }
+
+    /** GenOffice finds a computer's fonts in ~/.fonts, among Linux's folders;
+     * Android keeps them elsewhere. ~/.fonts gets a link to each font file in
+     * Documents/GenOffice/Fonts (the user's own, created when the app may use
+     * shared storage; they win a name clash), /system/fonts and /product/fonts.
+     * Flat, since one of GenOffice's scanners does not look into folders.
+     * Rebuilt each start: fonts added there show up after a restart. */
+    private void linkFonts(File dir) {
+        dir.mkdirs();
+        File[] old = dir.listFiles();
+        if (old != null) for (File f : old) if (java.nio.file.Files.isSymbolicLink(f.toPath())) f.delete();
+        java.util.List<File> sources = new java.util.ArrayList<>();
+        if (Paths.hasAllFiles()) {
+            File user = new File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS), "GenOffice/Fonts");
+            user.mkdirs();
+            sources.add(user);
+        }
+        sources.add(new File("/system/fonts"));
+        sources.add(new File("/product/fonts"));
+        int linked = 0;
+        for (File src : sources) {
+            File[] fonts = src.listFiles((d, name) -> name.matches("(?i).+\\.(ttf|otf|ttc|otc)"));
+            if (fonts == null) continue;
+            for (File f : fonts) {
+                File link = new File(dir, f.getName());
+                if (link.exists()) continue;
+                try {
+                    Os.symlink(f.getPath(), link.getPath());
+                    linked++;
+                } catch (Exception e) {
+                    Log.w(TAG, "font link " + f, e);
+                }
+            }
+        }
+        Log.i(TAG, "fonts linked: " + linked);
     }
 
     /** Node's heap limit: a quarter of the device's memory, 1.5-3 GB. */
