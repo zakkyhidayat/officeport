@@ -1726,7 +1726,26 @@ async function netFetch(input, init) {
     return handler(req)
   }
   if (scheme === 'file') return fileResponse(fileURLToPath(url.replace(/[?#].*$/, '')), typeof input === 'object' && input.headers ? input : new Request('http://x/', init))
-  return fetch(input, init)
+  return fetch(input, init).catch((err) => {
+    reportNetworkError(url, err)
+    throw err
+  })
+}
+
+// GenOffice reports only "Cannot reach …"; show the underlying cause once a minute per host
+const networkErrorShown = new Map()
+function reportNetworkError(url, err) {
+  if (err?.name === 'AbortError') return
+  let host = url
+  try {
+    host = new URL(url).host
+  } catch {}
+  const now = Date.now()
+  if (now - (networkErrorShown.get(host) || 0) < 60000) return
+  networkErrorShown.set(host, now)
+  const cause = err?.cause?.code || err?.cause?.message || err?.message || String(err)
+  console.error('net.fetch', host, err?.cause || err)
+  bus?.cmd('notify', { title: 'Network error: ' + host, body: String(cause) })
 }
 
 const net = fallback(

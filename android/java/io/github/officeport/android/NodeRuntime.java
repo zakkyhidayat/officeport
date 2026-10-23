@@ -147,6 +147,12 @@ final class NodeRuntime {
         env.put("GO_RES", resources().getPath());
         env.put("GO_DATA", data.getPath());
         env.put("NODE_OPTIONS", "");
+        File certs = writeCaCerts();
+        if (certs != null) {
+            // Termux's OpenSSL looks under /data/data/com.termux, which is not there
+            env.put("SSL_CERT_FILE", certs.getPath());
+            env.put("NODE_EXTRA_CA_CERTS", certs.getPath());
+        }
         env.putAll(extraEnv);
         process = pb.start();
         Thread reader = new Thread(this::pump, "node-output");
@@ -185,6 +191,31 @@ final class NodeRuntime {
         }
         if (code != 0) last += "\n" + diagnose();
         listener.onExit(code, last);
+    }
+
+    /** Android's trusted CAs (system and user-installed) as a PEM bundle. */
+    private File writeCaCerts() {
+        File out = new File(context.getFilesDir(), "cacerts.pem");
+        try {
+            java.security.KeyStore ks = java.security.KeyStore.getInstance("AndroidCAStore");
+            ks.load(null, null);
+            StringBuilder pem = new StringBuilder();
+            java.util.Enumeration<String> aliases = ks.aliases();
+            while (aliases.hasMoreElements()) {
+                java.security.cert.Certificate c = ks.getCertificate(aliases.nextElement());
+                if (c == null) continue;
+                pem.append("-----BEGIN CERTIFICATE-----\n")
+                        .append(android.util.Base64.encodeToString(c.getEncoded(), android.util.Base64.DEFAULT))
+                        .append("-----END CERTIFICATE-----\n");
+            }
+            try (OutputStream os = new FileOutputStream(out)) {
+                os.write(pem.toString().getBytes(StandardCharsets.US_ASCII));
+            }
+            return out;
+        } catch (Exception e) {
+            Log.w(TAG, "CA certificates", e);
+            return null;
+        }
     }
 
     /** After a crash: device facts and the exit codes of stripped-down Node
