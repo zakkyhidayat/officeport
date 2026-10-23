@@ -281,7 +281,9 @@ class Bus {
         p.pageId = msg.page
         p.seq = msg.seq - 1
       }
-      const deadline = Date.now() + 1000
+      // keys are answered at once: the page is blocked on them (synchronous
+      // XHR) and must not wait for a large message still on its way
+      const deadline = msg.kind === 'input' ? 0 : Date.now() + 1000
       while (msg.seq > p.seq + 1 && Date.now() < deadline) {
         await new Promise((resolve) => {
           p.waiters.push(resolve)

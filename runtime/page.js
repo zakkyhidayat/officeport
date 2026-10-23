@@ -322,12 +322,21 @@
   window.addEventListener('focus', () => life('focus'))
   window.addEventListener('blur', () => life('blur'))
   let lastTitle = null
-  new MutationObserver(() => {
+  // watches <head> only (where <title> is): watching the whole document would
+  // run on every edit in a large editor DOM
+  const titleObserver = new MutationObserver(() => {
     if (document.title !== lastTitle) {
       lastTitle = document.title
       life('title', { title: document.title })
     }
-  }).observe(document, { subtree: true, childList: true, characterData: true })
+  })
+  const watchTitle = () => {
+    titleObserver.disconnect()
+    if (document.head) titleObserver.observe(document.head, { subtree: true, childList: true, characterData: true })
+    titleObserver.observe(document.documentElement, { childList: true })
+  }
+  if (document.documentElement) watchTitle()
+  document.addEventListener('DOMContentLoaded', watchTitle)
 
   const CODE_KEYS = {
     Equal: '=',
@@ -427,6 +436,8 @@
       type,
       (e) => {
         if (!hooked(e)) return
+        // only keyDown can be cancelled in time to matter: keyUp goes without blocking the page
+        if (name === 'keyUp') return void postAsync(message('input', { input: inputOf(e, name) })).catch(() => {})
         const r = postSync(message('input', { input: inputOf(e, name) }))
         if (r.prevented) {
           e.preventDefault()
