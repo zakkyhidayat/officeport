@@ -174,9 +174,21 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         new Thread(() -> {
             try {
                 runtime.unpack();
+                if (runtime.freshPayload) {
+                    // a new payload keeps GenOffice's file names (assets/index-HASH.js)
+                    // while the build changed their content: WebView must not serve
+                    // the copies it cached for good from the last version
+                    main.post(() -> {
+                        WebView w = new WebView(this);
+                        w.clearCache(true);
+                        w.destroy();
+                    });
+                }
                 main.post(() -> splashText.setText("Starting " + appName() + "…"));
                 Map<String, String> env = new HashMap<>();
                 env.put("GO_TOKEN", token);
+                // Node's requests say what Electron's would: the browser's user agent
+                env.put("GO_UA", desktopUserAgent(WebSettings.getDefaultUserAgent(this)));
                 env.put("GO_WIDTH", Integer.toString(dp(root.getWidth() > 0 ? root.getWidth() : getResources().getDisplayMetrics().widthPixels)));
                 env.put("GO_HEIGHT", Integer.toString(dp(root.getHeight() > 0 ? root.getHeight() : getResources().getDisplayMetrics().heightPixels)));
                 env.put("GO_SCALE", Float.toString(density));
@@ -525,14 +537,16 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
     }
 
     private String userAgent(WebSettings s) {
-        if (userAgent == null) {
-            String def = s.getUserAgentString();
-            java.util.regex.Matcher m = java.util.regex.Pattern.compile("Chrome/([\\d.]+)").matcher(def);
-            String chrome = m.find() ? m.group(1) : "130.0.0.0";
-            String arch = Build.SUPPORTED_ABIS[0].startsWith("arm") ? "aarch64" : "x86_64";
-            userAgent = "Mozilla/5.0 (X11; Linux " + arch + ") AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + chrome + " Safari/537.36 Electron/39.0.0";
-        }
+        if (userAgent == null) userAgent = desktopUserAgent(s.getUserAgentString());
         return userAgent;
+    }
+
+    /** Desktop Electron's user agent, on WebView's Chrome version. */
+    private static String desktopUserAgent(String def) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("Chrome/([\\d.]+)").matcher(def);
+        String chrome = m.find() ? m.group(1) : "130.0.0.0";
+        String arch = Build.SUPPORTED_ABIS[0].startsWith("arm") ? "aarch64" : "x86_64";
+        return "Mozilla/5.0 (X11; Linux " + arch + ") AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + chrome + " Safari/537.36 Electron/39.0.0";
     }
 
     private void createWebView(int wc) {

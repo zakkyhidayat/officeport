@@ -1728,8 +1728,18 @@ async function netFetch(input, init) {
   if (scheme === 'file') return fileResponse(fileURLToPath(url.replace(/[?#].*$/, '')), typeof input === 'object' && input.headers ? input : new Request('http://x/', init))
   if (!/^https?:/i.test(url)) return fetch(input, init)
   const req = new Request(input, init)
+  // as Electron's net.fetch: the browser's user agent, not Node's "node"
+  if (!req.headers.has('user-agent') && process.env.GO_UA) req.headers.set('user-agent', process.env.GO_UA)
   try {
-    return await fetch(req.clone())
+    const res = await fetch(req.clone())
+    if (!blockedByEdge(res)) return res
+    // a CDN's bot check turned Node away: Android's HTTP stack asks again
+    try {
+      const again = await hostFetch(req)
+      if (!blockedByEdge(again)) return again
+    } catch {}
+    reportNetworkError(url, new Error(`HTTP ${res.status} from ${res.headers.get('server') || 'the server'} (blocked)`))
+    return res
   } catch (err) {
     if (err?.name === 'AbortError' || req.signal?.aborted) throw err
     // Node could not connect (TLS, DNS, a blocked client): Android's own HTTP
@@ -1742,6 +1752,13 @@ async function netFetch(input, init) {
       throw err
     }
   }
+}
+
+/** A CDN's bot check answering instead of the site (Cloudflare and the like). */
+function blockedByEdge(res) {
+  if (res.status !== 403 && res.status !== 429 && res.status !== 503) return false
+  const h = res.headers
+  return h.has('cf-mitigated') || h.has('cf-ray') || /cloudflare|akamai|cloudfront/i.test(h.get('server') || '')
 }
 
 async function hostFetch(req) {
