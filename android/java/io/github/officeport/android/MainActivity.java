@@ -280,10 +280,16 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
     /** GenOffice reads its fonts once, at start: a font copied into the fonts
      * folder offers a restart (the same restart a crash uses). */
     private void watchFonts() {
-        if (fontsObserver != null || !Paths.hasAllFiles()) return;
-        File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), appName() + "/Fonts");
-        if (!dir.isDirectory()) return;
-        fontsObserver = new android.os.FileObserver(dir, android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO) {
+        if (fontsObserver != null) return;
+        // the font folders and their subfolders as they are now (FileObserver does not recurse)
+        java.util.List<File> dirs = new java.util.ArrayList<>();
+        for (File d : Paths.userFontDirs()) {
+            dirs.add(d);
+            File[] subs = d.listFiles(File::isDirectory);
+            if (subs != null) java.util.Collections.addAll(dirs, subs);
+        }
+        if (dirs.isEmpty()) return;
+        fontsObserver = new android.os.FileObserver(dirs, android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO) {
             @Override
             public void onEvent(int event, String name) {
                 if (name == null || !name.matches("(?i).+\\.(ttf|otf|ttc|otc)")) return;
@@ -311,8 +317,9 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         prefs.edit().putBoolean("shownFontsHint", true).apply();
         new AlertDialog.Builder(this)
                 .setTitle("Adding fonts")
-                .setMessage(appName() + " uses Android's fonts and any font you put in\n\nDocuments › " + appName() + " › Fonts\n\n"
-                        + "Copy downloaded .ttf, .otf or .ttc files there (not into subfolders), then close and reopen " + appName() + ".")
+                .setMessage(appName() + " uses Android's fonts and any font you put in\n\n" + Paths.USER_FONTS_SHOWN + "\n\n"
+                        + "the user fonts folder, as on Linux (~/.local/share/fonts). Copy downloaded .ttf, .otf or .ttc files there, in folders too, "
+                        + "then close and reopen " + appName() + ". Folders starting with a dot are hidden in some file managers: turn on \"Show hidden files\".")
                 .setPositiveButton("OK", null)
                 .show();
     }

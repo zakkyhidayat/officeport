@@ -242,39 +242,47 @@ final class NodeRuntime {
     }
 
     /** GenOffice finds a computer's fonts in ~/.fonts, among Linux's folders;
-     * Android keeps them elsewhere. ~/.fonts gets a link to each font file in
-     * Documents/<app name>/Fonts (the user's own, created when the app may use
-     * shared storage; they win a name clash), /system/fonts and /product/fonts.
-     * Flat, since one of GenOffice's scanners does not look into folders.
-     * Rebuilt each start: fonts added there show up after a restart. */
+     * Android keeps them elsewhere. ~/.fonts here gets a link to each font
+     * file in the user's font folders (Paths.userFontDirs(): Linux's
+     * ~/.local/share/fonts on shared storage, with subfolders; they win a name
+     * clash), then /system/fonts and /product/fonts. Flat, since one of
+     * GenOffice's scanners does not look into folders. Rebuilt each start:
+     * fonts added show up after a restart. */
     private void linkFonts(File dir) {
         dir.mkdirs();
         File[] old = dir.listFiles();
         if (old != null) for (File f : old) if (java.nio.file.Files.isSymbolicLink(f.toPath())) f.delete();
-        java.util.List<File> sources = new java.util.ArrayList<>();
-        if (Paths.hasAllFiles()) {
-            File user = new File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS), appName() + "/Fonts");
-            user.mkdirs();
-            sources.add(user);
-        }
-        sources.add(new File("/system/fonts"));
-        sources.add(new File("/product/fonts"));
+        java.util.List<File> fonts = new java.util.ArrayList<>();
+        for (File d : Paths.userFontDirs()) collectFonts(d, 4, fonts);
+        collectFonts(new File("/system/fonts"), 1, fonts);
+        collectFonts(new File("/product/fonts"), 1, fonts);
         int linked = 0;
-        for (File src : sources) {
-            File[] fonts = src.listFiles((d, name) -> name.matches("(?i).+\\.(ttf|otf|ttc|otc)"));
-            if (fonts == null) continue;
-            for (File f : fonts) {
-                File link = new File(dir, f.getName());
-                if (link.exists()) continue;
-                try {
-                    Os.symlink(f.getPath(), link.getPath());
-                    linked++;
-                } catch (Exception e) {
-                    Log.w(TAG, "font link " + f, e);
-                }
+        for (File f : fonts) {
+            File link = new File(dir, f.getName());
+            // the same name in two folders: the second goes by its folder's name too
+            if (link.exists()) link = new File(dir, f.getParentFile().getName().replaceAll("[^\\w.-]", "_") + "-" + f.getName());
+            if (link.exists()) continue;
+            try {
+                Os.symlink(f.getPath(), link.getPath());
+                linked++;
+            } catch (Exception e) {
+                Log.w(TAG, "font link " + f, e);
             }
         }
         Log.i(TAG, "fonts linked: " + linked);
+    }
+
+    private static void collectFonts(File dir, int depth, java.util.List<File> out) {
+        File[] files = dir.listFiles();
+        if (files == null) return;
+        java.util.Arrays.sort(files);
+        for (File f : files) {
+            if (f.isDirectory()) {
+                if (depth > 1 && !f.getName().startsWith(".")) collectFonts(f, depth - 1, out);
+            } else if (f.getName().matches("(?i).+\\.(ttf|otf|ttc|otc)")) {
+                out.add(f);
+            }
+        }
     }
 
     /** Node's heap limit: a quarter of the device's memory, 1.5-3 GB. */

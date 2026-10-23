@@ -136,4 +136,22 @@ final class Paths {
         int n;
         while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
     }
+
+    /** Where the user's own fonts go, as on Linux: ~/.local/share/fonts (made
+     * here when the app may use shared storage), then the older ~/.fonts; ~
+     * being shared storage's root. Subfolders count. */
+    static java.util.List<File> userFontDirs() {
+        java.util.List<File> dirs = new java.util.ArrayList<>();
+        if (!hasAllFiles()) return dirs;
+        File home = android.os.Environment.getExternalStorageDirectory();
+        File fonts = new File(home, ".local/share/fonts");
+        fonts.mkdirs();
+        dirs.add(fonts);
+        File legacy = new File(home, ".fonts");
+        if (legacy.isDirectory()) dirs.add(legacy);
+        return dirs;
+    }
+
+    /** How userFontDirs()'s first folder reads in a file manager. */
+    static final String USER_FONTS_SHOWN = "Internal storage › .local › share › fonts";
 }

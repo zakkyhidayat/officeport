@@ -44,9 +44,11 @@ def rebrand(path, name):
 FONTS_TITLE = {'id': 'Tambahkan font sendiri', 'en': 'Add your own fonts'}
 FONTS_BODY = {
     'id': 'Font bawaan Android sudah tersedia. Untuk font lain, salin file .ttf, .otf, atau .ttc '
-          'ke Documents › {name} › Fonts (bukan ke subfolder), lalu buka ulang {name}.',
+          'ke .local › share › fonts di penyimpanan internal (seperti ~/.local/share/fonts di Linux; '
+          'boleh dalam subfolder), lalu buka ulang {name}.',
     'en': "Android's own fonts are ready to use. For others, copy .ttf, .otf or .ttc files "
-          'into Documents › {name} › Fonts (not into subfolders), then reopen {name}.',
+          "into .local › share › fonts on internal storage (Linux's ~/.local/share/fonts; "
+          'subfolders work too), then reopen {name}.',
 }
 # GenOffice's Indonesian slide title, to tell that locale apart from the others
 ID_TITLE2 = 'Ini baru permulaan'

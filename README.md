@@ -74,6 +74,8 @@ context menu stops being offered as a mistake there, but WebView still
 underlines it: only the keyboard can add words to Android's own dictionary.
 
 Fonts: the app uses Android's fonts (`/system/fonts`, `/product/fonts`) and
-any `.ttf`, `.otf` or `.ttc` file put in `Documents/<app name>/Fonts` (made
-when the app has all-files access; not subfolders). A font added there is
-picked up after a restart, which the app offers when it sees the file.
+the user's fonts in the Linux user font folders on internal storage:
+`~/.local/share/fonts` (made when the app has all-files access) and the older
+`~/.fonts`, subfolders included. A font added there is picked up after a
+restart, which the app offers when it sees the file. Folders whose names start
+with a dot are hidden in some file managers until they show hidden files.
