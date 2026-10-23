@@ -37,6 +37,8 @@ final class NodeRuntime {
     private Process process;
     private String stamp = "";
     private Map<String, String> lastEnv;
+    /** The last unpack() put a new payload in place (not this version's again). */
+    boolean freshPayload;
     private final StringBuilder tail = new StringBuilder();
 
     NodeRuntime(Context context, Listener listener) {
@@ -64,6 +66,7 @@ final class NodeRuntime {
             linkNative();
             return;
         }
+        freshPayload = true;
         listener.onProgress("Preparing " + appName() + "…", 0);
         deleteTree(root);
         if (!root.mkdirs() && !root.isDirectory()) throw new IOException("cannot create " + root);
