@@ -36,6 +36,7 @@ final class NodeRuntime {
     private final Listener listener;
     private Process process;
     private String stamp = "";
+    private Map<String, String> lastEnv;
     private final StringBuilder tail = new StringBuilder();
 
     NodeRuntime(Context context, Listener listener) {
@@ -127,18 +128,21 @@ final class NodeRuntime {
     }
 
     void start(Map<String, String> extraEnv) throws IOException {
+        lastEnv = extraEnv;
         String libDir = context.getApplicationInfo().nativeLibraryDir;
         File data = new File(context.getFilesDir(), "data");
         File home = new File(data, "home");
         File tmp = new File(context.getCacheDir(), "tmp");
         home.mkdirs();
         tmp.mkdirs();
-        ProcessBuilder pb = new ProcessBuilder(
+        java.util.List<String> cmd = new java.util.ArrayList<>(java.util.Arrays.asList(
                 libDir + "/libgonode.so",
                 "--max-old-space-size=" + heapMb(),
                 "--disable-warning=ExperimentalWarning",
-                "--expose-gc",
-                new File(root(), "runtime/main.js").getPath());
+                "--expose-gc"));
+        if (jitless()) cmd.add("--jitless");
+        cmd.add(new File(root(), "runtime/main.js").getPath());
+        ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.directory(home);
         pb.redirectErrorStream(true);
         Map<String, String> env = pb.environment();
@@ -197,17 +201,43 @@ final class NodeRuntime {
         synchronized (tail) {
             last = tail.toString();
         }
-        if (code != 0) last += "\n" + diagnose();
+        // a segfault before GenOffice ran, with V8's JIT on: some CPUs and kernels
+        // reject the JIT's code, so the next start goes without it (slower, but runs)
+        if (!ready && code == 139 && !jitless()) {
+            Log.w(TAG, "node crashed at startup (139); restarting with --jitless");
+            prefs().edit().putBoolean("jitless", true).apply();
+            synchronized (tail) {
+                tail.setLength(0);
+            }
+            try {
+                start(lastEnv);
+                return;
+            } catch (IOException e) {
+                last += "\nrestart: " + e;
+            }
+        }
+        String mode = jitless() ? "(ran with --jitless)\n" : "";
+        // --jitless did not help either: the JIT was not the cause, keep it on next time
+        if (!ready && code == 139 && jitless()) prefs().edit().remove("jitless").apply();
+        if (code != 0) last += "\n" + diagnose() + mode;
         listener.onExit(code, last);
     }
 
-    /** Node's heap limit: a quarter of the device's memory, 1-3 GB. */
+    private android.content.SharedPreferences prefs() {
+        return context.getSharedPreferences("officeport", Context.MODE_PRIVATE);
+    }
+
+    private boolean jitless() {
+        return prefs().getBoolean("jitless", false);
+    }
+
+    /** Node's heap limit: a quarter of the device's memory, 1.5-3 GB. */
     private int heapMb() {
         android.app.ActivityManager am = (android.app.ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
         android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
         am.getMemoryInfo(mi);
         long mb = mi.totalMem / (4L << 20);
-        return (int) Math.max(1024, Math.min(3072, mb));
+        return (int) Math.max(1536, Math.min(3072, mb));
     }
 
     /** Android's trusted CAs (system and user-installed) as a PEM bundle. */

@@ -400,6 +400,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
                 case "app.quit": quit(); break;
                 case "app.relaunch": relaunch(); break;
                 case "theme.set": break;
+                case "net.fetch": new Thread(() -> netFetch(c, req), "net-fetch").start(); break;
                 case "spell.check": spelling.check(c.optString("word"), c.optString("language"), r -> host.reply(req, r)); break;
                 default:
                     Log.w(TAG, "unknown command " + name);
@@ -1199,6 +1200,59 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         }
     }
 
+    /** A request Node could not make itself (runtime/electron.js hostFetch), on Android's HTTP stack. */
+    private void netFetch(JSONObject c, int req) {
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new java.net.URL(c.getString("url")).openConnection();
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(30000);
+            conn.setInstanceFollowRedirects(true);
+            conn.setRequestMethod(c.optString("method", "GET"));
+            JSONObject headers = c.optJSONObject("headers");
+            if (headers != null) {
+                for (java.util.Iterator<String> it = headers.keys(); it.hasNext(); ) {
+                    String k = it.next();
+                    if (!k.equalsIgnoreCase("content-length") && !k.equalsIgnoreCase("host")) conn.setRequestProperty(k, headers.getString(k));
+                }
+            }
+            String body = c.optString("body");
+            if (!body.isEmpty()) {
+                byte[] bytes = Base64.decode(body, Base64.DEFAULT);
+                conn.setDoOutput(true);
+                conn.setFixedLengthStreamingMode(bytes.length);
+                try (java.io.OutputStream os = conn.getOutputStream()) {
+                    os.write(bytes);
+                }
+            }
+            int status = conn.getResponseCode();
+            JSONObject outHeaders = new JSONObject();
+            for (Map.Entry<String, List<String>> e : conn.getHeaderFields().entrySet()) {
+                // the body arrives decoded and whole
+                if (e.getKey() == null || e.getKey().equalsIgnoreCase("content-encoding") || e.getKey().equalsIgnoreCase("content-length") || e.getKey().equalsIgnoreCase("transfer-encoding")) continue;
+                outHeaders.put(e.getKey().toLowerCase(Locale.ROOT), android.text.TextUtils.join(", ", e.getValue()));
+            }
+            InputStream in = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            ByteArrayOutputStream buf = new ByteArrayOutputStream();
+            if (in != null) {
+                try (InputStream is = in) {
+                    byte[] b = new byte[16384];
+                    for (int n; (n = is.read(b)) > 0; ) {
+                        buf.write(b, 0, n);
+                        if (buf.size() > (32 << 20)) throw new java.io.IOException("response over 32 MB");
+                    }
+                }
+            }
+            JSONObject r = new JSONObject().put("status", status).put("headers", outHeaders)
+                    .put("body", Base64.encodeToString(buf.toByteArray(), Base64.NO_WRAP));
+            if (host != null) host.reply(req, r);
+        } catch (Exception e) {
+            if (host != null) host.fail(req, String.valueOf(e));
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
     private String openPath(String path) {
         File f = new File(path);
         if (!f.exists()) return "not found: " + path;
@@ -1266,8 +1320,9 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
     @Override
     public void onTrimMemory(int level) {
         super.onTrimMemory(level);
-        // in the background, or short of memory in the foreground: Node collects garbage
-        if (host != null && connected && level >= TRIM_MEMORY_RUNNING_LOW) {
+        // in the background, or critically short of memory in the foreground: Node
+        // collects garbage (a full collection pauses it, so not on milder warnings)
+        if (host != null && connected && level >= TRIM_MEMORY_RUNNING_CRITICAL) {
             host.event("memory", "level", level);
         }
     }

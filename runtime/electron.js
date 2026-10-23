@@ -1726,10 +1726,37 @@ async function netFetch(input, init) {
     return handler(req)
   }
   if (scheme === 'file') return fileResponse(fileURLToPath(url.replace(/[?#].*$/, '')), typeof input === 'object' && input.headers ? input : new Request('http://x/', init))
-  return fetch(input, init).catch((err) => {
-    reportNetworkError(url, err)
-    throw err
+  if (!/^https?:/i.test(url)) return fetch(input, init)
+  const req = new Request(input, init)
+  try {
+    return await fetch(req.clone())
+  } catch (err) {
+    if (err?.name === 'AbortError' || req.signal?.aborted) throw err
+    // Node could not connect (TLS, DNS, a blocked client): Android's own HTTP
+    // stack, with the system's certificates and network settings, tries again
+    try {
+      return await hostFetch(req)
+    } catch (fallbackErr) {
+      reportNetworkError(url, err)
+      console.error('net.fetch fallback', url, fallbackErr.message)
+      throw err
+    }
+  }
+}
+
+async function hostFetch(req) {
+  const headers = {}
+  req.headers.forEach((v, k) => {
+    headers[k] = v
   })
+  const body = req.method === 'GET' || req.method === 'HEAD' ? '' : Buffer.from(await req.arrayBuffer()).toString('base64')
+  const r = await Promise.race([
+    bus.request('net.fetch', { url: req.url, method: req.method, headers, body }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 30000)),
+  ])
+  const status = r.status
+  const nullBody = status === 204 || status === 304 || req.method === 'HEAD'
+  return new Response(nullBody ? null : Buffer.from(r.body || '', 'base64'), { status, headers: r.headers || {} })
 }
 
 // GenOffice reports only "Cannot reach …"; show the underlying cause once a minute per host
