@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- a bold white O, inside the adaptive icon's 66dp safe zone -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#ffffff" android:pathData="M38,30h22l12,12v36a2,2 0,0 1,-2 2h-32a2,2 0,0 1,-2 -2v-46a2,2 0,0 1,2 -2z" />
-    <path android:fillColor="#c9dbf7" android:pathData="M60,30l12,12h-10a2,2 0,0 1,-2 -2z" />
-    <path android:fillColor="#2f6fd6" android:pathData="M43,52h22v3h-22zM43,60h22v3h-22zM43,68h14v3h-14z" />
+    <path android:fillColor="#ffffff" android:fillType="evenOdd"
+        android:pathData="M54,32 C64,32 70,40 70,54 C70,68 64,76 54,76 C44,76 38,68 38,54 C38,40 44,32 54,32 Z M54,41 C50,41 47.5,45 47.5,54 C47.5,63 50,67 54,67 C58,67 60.5,63 60.5,54 C60.5,45 58,41 54,41 Z" />
 </vector>

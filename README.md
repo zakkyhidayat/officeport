@@ -4,9 +4,12 @@
 Googlebook, Samsung DeX, and other Android devices with a keyboard and a
 large screen. arm64-v8a and x86_64.
 
-This is an unofficial port, not affiliated with Genspark or Mainfunc. GenOffice
-is Apache-2.0; its name and logo are Mainfunc's trademarks, so the port has its
-own name and icon.
+This is an unofficial fork, built on GenOffice's codebase and not affiliated
+with Genspark or Mainfunc. GenOffice is Apache-2.0; its name and logo are
+Mainfunc's trademarks, so the app has its own name and icon: the build shows
+the app's name (`app_name` in `android/res/values/strings.xml`) wherever
+GenOffice's release shows "GenOffice" (`scripts/rebrand.py`), except where
+Genspark's servers see it (the user agent and the MCP client name).
 
 ## How it works
 

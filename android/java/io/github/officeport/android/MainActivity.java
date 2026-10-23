@@ -174,7 +174,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         new Thread(() -> {
             try {
                 runtime.unpack();
-                main.post(() -> splashText.setText("Starting GenOffice…"));
+                main.post(() -> splashText.setText("Starting " + appName() + "…"));
                 Map<String, String> env = new HashMap<>();
                 env.put("GO_TOKEN", token);
                 env.put("GO_WIDTH", Integer.toString(dp(root.getWidth() > 0 ? root.getWidth() : getResources().getDisplayMetrics().widthPixels)));
@@ -191,7 +191,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
                 runtime.start(env);
             } catch (Exception e) {
                 Log.e(TAG, "start", e);
-                main.post(() -> showFailure("GenOffice could not start.", String.valueOf(e)));
+                main.post(() -> showFailure(appName() + " could not start.", String.valueOf(e)));
             }
         }, "start").start();
     }
@@ -201,7 +201,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         splash.setOrientation(LinearLayout.VERTICAL);
         splash.setGravity(Gravity.CENTER);
         splashText = new TextView(this);
-        splashText.setText("Starting GenOffice…");
+        splashText.setText("Starting " + appName() + "…");
         splashText.setTextSize(16);
         splashText.setGravity(Gravity.CENTER);
         splashBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
@@ -255,6 +255,11 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         root.addView(box);
     }
 
+    /** The app's name (android:label), shown where the user reads it. */
+    String appName() {
+        return getApplicationInfo().loadLabel(getPackageManager()).toString();
+    }
+
     private android.os.FileObserver fontsObserver;
     private boolean fontsDialogShown;
 
@@ -262,7 +267,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
      * folder offers a restart (the same restart a crash uses). */
     private void watchFonts() {
         if (fontsObserver != null || !Paths.hasAllFiles()) return;
-        File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "GenOffice/Fonts");
+        File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), appName() + "/Fonts");
         if (!dir.isDirectory()) return;
         fontsObserver = new android.os.FileObserver(dir, android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO) {
             @Override
@@ -273,7 +278,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
                     fontsDialogShown = true;
                     new AlertDialog.Builder(MainActivity.this)
                             .setTitle("New font added")
-                            .setMessage(name + " can be used after GenOffice restarts. Save your work first.")
+                            .setMessage(name + " can be used after " + appName() + " restarts. Save your work first.")
                             .setPositiveButton("Restart now", (d, w) -> relaunch())
                             .setNegativeButton("Later", (d, w) -> fontsDialogShown = false)
                             .setOnCancelListener(d -> fontsDialogShown = false)
@@ -292,8 +297,8 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         prefs.edit().putBoolean("shownFontsHint", true).apply();
         new AlertDialog.Builder(this)
                 .setTitle("Adding fonts")
-                .setMessage("GenOffice uses Android's fonts and any font you put in\n\nDocuments › GenOffice › Fonts\n\n"
-                        + "Copy downloaded .ttf, .otf or .ttc files there (not into subfolders), then close and reopen GenOffice.")
+                .setMessage(appName() + " uses Android's fonts and any font you put in\n\nDocuments › " + appName() + " › Fonts\n\n"
+                        + "Copy downloaded .ttf, .otf or .ttc files there (not into subfolders), then close and reopen " + appName() + ".")
                 .setPositiveButton("OK", null)
                 .show();
     }
@@ -355,11 +360,11 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
             long now = System.currentTimeMillis();
             if (wasRunning && code != 0 && now - prefs.getLong("autoRestartAt", 0) > 3 * 60_000) {
                 prefs.edit().putLong("autoRestartAt", now).commit();
-                Toast.makeText(this, "GenOffice stopped unexpectedly. Restarting…", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, appName() + " stopped unexpectedly. Restarting…", Toast.LENGTH_LONG).show();
                 relaunch();
                 return;
             }
-            showFailure(wasRunning ? "GenOffice stopped unexpectedly." : "GenOffice could not start.",
+            showFailure(appName() + (wasRunning ? " stopped unexpectedly." : " could not start."),
                     "Exit code " + code + "\n\n" + lastLines);
         });
     }
