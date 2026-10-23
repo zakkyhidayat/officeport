@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- the app's O: straight sides, rounded top and bottom, the counter as drawn; white, 56dp tall -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#ffffff" android:pathData="M38,30h22l12,12v36a2,2 0,0 1,-2 2h-32a2,2 0,0 1,-2 -2v-46a2,2 0,0 1,2 -2z" />
-    <path android:fillColor="#c9dbf7" android:pathData="M60,30l12,12h-10a2,2 0,0 1,-2 -2z" />
-    <path android:fillColor="#2f6fd6" android:pathData="M43,52h22v3h-22zM43,60h22v3h-22zM43,68h14v3h-14z" />
+    <group android:translateX="26" android:translateY="26" android:scaleX="0.109375" android:scaleY="0.109375">
+        <path android:fillColor="#ffffff" android:pathData="M256 0C372 0 446 28 446 150V362C446 484 372 512 256 512S66 484 66 362V150C66 28 140 0 256 0ZM207.7 181.62v189.33h29.94c23.19 0 40.1-2.41 50.72-7.24 10.63-4.83 15.94-15.94 15.94-33.33V141.05h-29.94c-23.19 0-40.1 2.4-50.72 7.24-10.63 4.83-15.94 15.94-15.94 33.33z" />
+    </group>
 </vector>

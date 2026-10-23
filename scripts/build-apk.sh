@@ -52,6 +52,9 @@ payload=$build/payload-$version
 rm -rf "$payload"
 mkdir -p "$payload/res/cli" "$payload/runtime"
 npx --yes @electron/asar@3.2.17 extract "$rel/resources/app.asar" "$payload/res/app"
+# the app's own name (android/res/values/strings.xml) where GenOffice shows its name
+app_name=$(sed -n 's|.*<string name="app_name">\(.*\)</string>.*|\1|p' "$here/android/res/values/strings.xml")
+python3 -I "$here/scripts/rebrand.py" "$payload/res/app" "$app_name"
 cp -a "$rel/resources/modules" "$rel/resources/wasm" "$payload/res/"
 [[ -d $rel/resources/gsk ]] && cp -a "$rel/resources/gsk" "$payload/res/"
 # the agent skill text (Settings > Integrations); the CLI itself is desktop-only

@@ -1,12 +1,17 @@
 # Officeport
 
+<img src="docs/logo.svg" alt="" width="96">
+
 [GenOffice](https://github.com/genspark-ai/genoffice) for Android desktops:
 Googlebook, Samsung DeX, and other Android devices with a keyboard and a
 large screen. arm64-v8a and x86_64.
 
-This is an unofficial port, not affiliated with Genspark or Mainfunc. GenOffice
-is Apache-2.0; its name and logo are Mainfunc's trademarks, so the port has its
-own name and icon.
+This is an unofficial fork, built on GenOffice's codebase and not affiliated
+with Genspark or Mainfunc. GenOffice is Apache-2.0; its name and logo are
+Mainfunc's trademarks, so the app has its own name and icon: the build shows
+the app's name (`app_name` in `android/res/values/strings.xml`) wherever
+GenOffice's release shows "GenOffice" (`scripts/rebrand.py`), except where
+Genspark's servers see it (the user agent and the MCP client name).
 
 ## How it works
 
@@ -61,19 +66,7 @@ System > Languages > Spell checker). A word added to the dictionary from the
 context menu stops being offered as a mistake there, but WebView still
 underlines it: only the keyboard can add words to Android's own dictionary.
 
-## GNOME window buttons for desktop GenOffice (Linux)
-
-Separate from the Android port: `desktop/gnome/` replaces the window buttons
-of the installed desktop GenOffice (Electron's title bar overlay) with
-GNOME's, laid out as libadwaita lays them out (24 px circles in 34 px buttons 3 px apart, 7 px
-from the edge, Adwaita icons, dimmed when the window is not focused) and on
-the side GNOME's `button-layout` setting puts them.
-
-```bash
-desktop/gnome/update-genoffice.sh
-```
-
-It patches `/opt/GenOffice/resources/app.asar` (asking for sudo) and keeps the
-unpatched one as `app.asar.orig`. Run it again after each GenOffice update; a
-version already patched is left alone. `--no-install` only writes the patched
-`app.asar`; `--restore` puts the unpatched one back.
+Fonts: the app uses Android's fonts (`/system/fonts`, `/product/fonts`) and
+any `.ttf`, `.otf` or `.ttc` file put in `Documents/<app name>/Fonts` (made
+when the app has all-files access; not subfolders). A font added there is
+picked up after a restart, which the app offers when it sees the file.

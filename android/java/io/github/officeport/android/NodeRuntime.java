@@ -64,7 +64,7 @@ final class NodeRuntime {
             linkNative();
             return;
         }
-        listener.onProgress("Preparing GenOffice…", 0);
+        listener.onProgress("Preparing " + appName() + "…", 0);
         deleteTree(root);
         if (!root.mkdirs() && !root.isDirectory()) throw new IOException("cannot create " + root);
         long total;
@@ -95,7 +95,7 @@ final class NodeRuntime {
                 int percent = (int) (done * 100 / Math.max(1, total));
                 if (percent != lastPercent) {
                     lastPercent = percent;
-                    listener.onProgress("Preparing GenOffice…", percent);
+                    listener.onProgress("Preparing " + appName() + "…", percent);
                 }
             }
         }
@@ -226,6 +226,10 @@ final class NodeRuntime {
         listener.onExit(code, last);
     }
 
+    private String appName() {
+        return context.getApplicationInfo().loadLabel(context.getPackageManager()).toString();
+    }
+
     private android.content.SharedPreferences prefs() {
         return context.getSharedPreferences("officeport", Context.MODE_PRIVATE);
     }
@@ -236,7 +240,7 @@ final class NodeRuntime {
 
     /** GenOffice finds a computer's fonts in ~/.fonts, among Linux's folders;
      * Android keeps them elsewhere. ~/.fonts gets a link to each font file in
-     * Documents/GenOffice/Fonts (the user's own, created when the app may use
+     * Documents/<app name>/Fonts (the user's own, created when the app may use
      * shared storage; they win a name clash), /system/fonts and /product/fonts.
      * Flat, since one of GenOffice's scanners does not look into folders.
      * Rebuilt each start: fonts added there show up after a restart. */
@@ -246,7 +250,7 @@ final class NodeRuntime {
         if (old != null) for (File f : old) if (java.nio.file.Files.isSymbolicLink(f.toPath())) f.delete();
         java.util.List<File> sources = new java.util.ArrayList<>();
         if (Paths.hasAllFiles()) {
-            File user = new File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS), "GenOffice/Fonts");
+            File user = new File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS), appName() + "/Fonts");
             user.mkdirs();
             sources.add(user);
         }
