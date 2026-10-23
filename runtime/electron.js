@@ -1730,15 +1730,29 @@ async function netFetch(input, init) {
   const req = new Request(input, init)
   // as Electron's net.fetch: the browser's user agent, not Node's "node"
   if (!req.headers.has('user-agent') && process.env.GO_UA) req.headers.set('user-agent', process.env.GO_UA)
+  const host = new URL(url).host
+  // a host whose CDN already turned Node away goes to WebView straight (for a while)
+  if ((blockedHosts.get(host) || 0) > Date.now()) {
+    try {
+      return await webFetch(req.clone())
+    } catch {}
+  }
   try {
     const res = await fetch(req.clone())
     if (!blockedByEdge(res)) return res
-    // a CDN's bot check turned Node away: Android's HTTP stack asks again
+    blockedHosts.set(host, Date.now() + 10 * 60000)
+    // a CDN's bot check turned Node away (by how it speaks TLS, as it does
+    // Android's HTTP stack): the request goes from a page of the site in a
+    // hidden WebView, on Chromium's network stack as on desktop
+    let reason = ''
     try {
-      const again = await hostFetch(req)
+      const again = await webFetch(req)
       if (!blockedByEdge(again)) return again
-    } catch {}
-    reportNetworkError(url, new Error(`HTTP ${res.status} from ${res.headers.get('server') || 'the server'} (blocked)`))
+      reason = ` (in WebView too: HTTP ${again.status})`
+    } catch (err) {
+      reason = ` (WebView: ${err.message})`
+    }
+    reportNetworkError(url, new Error(`HTTP ${res.status} from ${res.headers.get('server') || 'the server'}, blocked${reason}`))
     return res
   } catch (err) {
     if (err?.name === 'AbortError' || req.signal?.aborted) throw err
@@ -1754,11 +1768,30 @@ async function netFetch(input, init) {
   }
 }
 
+const blockedHosts = new Map()
+
 /** A CDN's bot check answering instead of the site (Cloudflare and the like). */
 function blockedByEdge(res) {
   if (res.status !== 403 && res.status !== 429 && res.status !== 503) return false
   const h = res.headers
   return h.has('cf-mitigated') || h.has('cf-ray') || /cloudflare|akamai|cloudfront/i.test(h.get('server') || '')
+}
+
+async function webFetch(req) {
+  const headers = {}
+  req.headers.forEach((v, k) => {
+    headers[k] = v
+  })
+  const body = req.method === 'GET' || req.method === 'HEAD' ? '' : Buffer.from(await req.arrayBuffer()).toString('base64')
+  const r = await Promise.race([
+    bus.request('net.webFetch', { url: req.url, method: req.method, headers, body }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 70000)),
+  ])
+  const h = new Headers(r.headers || {})
+  // the page cannot read Set-Cookie: the host hands over the cookie jar's
+  for (const c of r.setCookies || []) h.append('set-cookie', c)
+  const nullBody = r.status === 204 || r.status === 304 || req.method === 'HEAD'
+  return new Response(nullBody ? null : Buffer.from(r.body || '', 'base64'), { status: r.status, headers: h })
 }
 
 async function hostFetch(req) {
