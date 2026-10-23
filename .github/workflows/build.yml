@@ -34,12 +34,19 @@ jobs:
           INPUT: ${{ inputs.version }}
         run: |
           if [[ -n "$INPUT" ]]; then v=$INPUT
-          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then v=${GITHUB_REF#refs/tags/v}
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then v=${GITHUB_REF#refs/tags/v}; v=${v%-f*}
           else v=$(gh release view -R genspark-ai/genoffice --json tagName -q .tagName | sed 's/^v//')
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
-          # the daily run stops when this version is already released here
-          if [[ "$GITHUB_EVENT_NAME" == schedule ]] && gh release view "v$v" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          # this fork's builds of GenOffice $v are released as v$v-f1, v$v-f2, ...:
+          # the next one takes the next number
+          last=$(gh release list -R "$GITHUB_REPOSITORY" --limit 200 --json tagName -q '.[].tagName' |
+            sed -n "s/^v${v//./\\.}-f\([0-9]*\)$/\1/p" | sort -n | tail -1)
+          fork=$(( ${last:-0} + 1 ))
+          echo "fork=$fork" >> "$GITHUB_OUTPUT"
+          echo "app=$v-f$fork" >> "$GITHUB_OUTPUT"
+          # the daily run stops when this GenOffice version is already released here
+          if [[ "$GITHUB_EVENT_NAME" == schedule && -n "$last" ]]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -85,12 +92,14 @@ jobs:
           KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           JOBS: 4
+          FORK: ${{ steps.version.outputs.fork }}
+          UPDATE_REPO: ${{ github.repository }}
         run: scripts/build-apk.sh "${{ steps.version.outputs.version }}"
 
       - uses: actions/upload-artifact@v4
         if: steps.version.outputs.skip != 'true'
         with:
-          name: officeport-${{ steps.version.outputs.version }}
+          name: officeport-${{ steps.version.outputs.app }}
           path: dist/*.apk
           compression-level: 0
 
@@ -100,6 +109,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           v=${{ steps.version.outputs.version }}
-          gh release view "v$v" >/dev/null 2>&1 || gh release create "v$v" --title "Officeport $v" \
-            --notes "GenOffice $v for Android desktops (Googlebook, Samsung DeX). Unofficial port; not affiliated with Genspark. Install the APK for your device: arm64-v8a (most devices) or x86_64; universal has both."
-          gh release upload "v$v" dist/*.apk --clobber
+          app=${{ steps.version.outputs.app }}
+          gh release create "v$app" dist/*.apk --target "$GITHUB_SHA" --title "Officeport $app" \
+            --notes "Officeport $app: GenOffice $v for Android desktops (Googlebook, Samsung DeX), fork build ${{ steps.version.outputs.fork }}. Unofficial fork built on GenOffice's codebase; not affiliated with Genspark. Install the APK for your device: arm64-v8a (most devices) or x86_64; universal has both."

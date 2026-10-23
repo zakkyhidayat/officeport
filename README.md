@@ -43,8 +43,15 @@ ANDROID_HOME=~/Android/Sdk ANDROID_NDK_HOME=~/Android/Sdk/ndk/29.0.14206865 scri
 
 The APKs are written to `dist/`: one per ABI and a universal one.
 
+Versions: each build of a GenOffice version is a fork build, `VERSION-fN`
+(`0.12.29-f1`, `0.12.29-f2`, ...; `FORK=N`, default 0 for a local build). CI
+numbers them itself and releases each as its own `vVERSION-fN`, so earlier
+builds stay downloadable. The app looks for a newer release of its repository
+twice a day and offers it (`UPDATE_REPO`; a private repository cannot be
+checked without signing in, so it stays quiet then).
+
 On GitHub, `.github/workflows/build.yml` builds on demand, on a `v*` tag, and
-daily when GenOffice has a new release. To sign with your own key, set the
+daily when GenOffice has a new release. A manual run with `release` checked publishes the build. To sign with your own key, set the
 secrets `KEYSTORE_BASE64` (`base64 -w0 release.keystore`), `KEYSTORE_PASS`
 and `KEY_ALIAS`; without them each build uses a throwaway key, and an APK
 signed with one key does not update an install signed with another.
@@ -67,6 +74,8 @@ context menu stops being offered as a mistake there, but WebView still
 underlines it: only the keyboard can add words to Android's own dictionary.
 
 Fonts: the app uses Android's fonts (`/system/fonts`, `/product/fonts`) and
-any `.ttf`, `.otf` or `.ttc` file put in `Documents/<app name>/Fonts` (made
-when the app has all-files access; not subfolders). A font added there is
-picked up after a restart, which the app offers when it sees the file.
+the user's fonts in the Linux user font folders on internal storage:
+`~/.local/share/fonts` (made when the app has all-files access) and the older
+`~/.fonts`, subfolders included. A font added there is picked up after a
+restart, which the app offers when it sees the file. Folders whose names start
+with a dot are hidden in some file managers until they show hidden files.
