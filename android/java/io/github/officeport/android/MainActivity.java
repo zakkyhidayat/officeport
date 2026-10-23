@@ -242,6 +242,20 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         root.addView(box);
     }
 
+    /** Once, when the fonts folder exists (it needs all-files access): where downloaded fonts go. */
+    private void showFontsHint() {
+        if (!Paths.hasAllFiles()) return;
+        SharedPreferences prefs = getSharedPreferences("officeport", MODE_PRIVATE);
+        if (prefs.getBoolean("shownFontsHint", false)) return;
+        prefs.edit().putBoolean("shownFontsHint", true).apply();
+        new AlertDialog.Builder(this)
+                .setTitle("Adding fonts")
+                .setMessage("GenOffice uses Android's fonts and any font you put in\n\nDocuments › GenOffice › Fonts\n\n"
+                        + "Copy downloaded .ttf, .otf or .ttc files there (not into subfolders), then close and reopen GenOffice.")
+                .setPositiveButton("OK", null)
+                .show();
+    }
+
     private void askForFileAccess() {
         if (Paths.hasAllFiles()) return;
         SharedPreferences prefs = getSharedPreferences("officeport", MODE_PRIVATE);
@@ -279,6 +293,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
             host = new HostChannel(port, nodeToken, this);
             host.open();
             connected = true;
+            showFontsHint();
             sendDisplay();
             for (String p : pendingOpen) host.event("open-file", "path", p);
             pendingOpen.clear();
