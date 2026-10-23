@@ -272,6 +272,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         return getApplicationInfo().loadLabel(getPackageManager()).toString();
     }
 
+    private final WebFetcher webFetcher = new WebFetcher(this);
     private android.os.FileObserver fontsObserver;
     private boolean fontsDialogShown;
 
@@ -492,6 +493,11 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
                 case "app.relaunch": relaunch(); break;
                 case "theme.set": break;
                 case "net.fetch": new Thread(() -> netFetch(c, req), "net-fetch").start(); break;
+                case "net.webFetch": webFetcher.fetch(c, (r, err) -> {
+                    if (host == null) return;
+                    if (r != null) host.reply(req, r);
+                    else host.fail(req, err);
+                }); break;
                 case "spell.check": spelling.check(c.optString("word"), c.optString("language"), r -> host.reply(req, r)); break;
                 default:
                     Log.w(TAG, "unknown command " + name);
@@ -1454,6 +1460,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         webs.clear();
         if (spelling != null) spelling.close();
         if (fontsObserver != null) fontsObserver.stopWatching();
+        webFetcher.close();
         super.onDestroy();
     }
 }
