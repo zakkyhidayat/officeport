@@ -9,6 +9,10 @@ on:
       version:
         description: GenOffice version (e.g. 0.12.29); empty for the latest
         required: false
+      release:
+        description: Upload the APKs to the release (replacing its files)
+        type: boolean
+        default: false
   push:
     tags: ['v*']
   schedule:
@@ -91,7 +95,7 @@ jobs:
           compression-level: 0
 
       - name: Release
-        if: steps.version.outputs.skip != 'true' && github.event_name != 'workflow_dispatch'
+        if: steps.version.outputs.skip != 'true' && (github.event_name != 'workflow_dispatch' || inputs.release)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
