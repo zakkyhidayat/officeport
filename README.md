@@ -43,8 +43,15 @@ ANDROID_HOME=~/Android/Sdk ANDROID_NDK_HOME=~/Android/Sdk/ndk/29.0.14206865 scri
 
 The APKs are written to `dist/`: one per ABI and a universal one.
 
+Versions: each build of a GenOffice version is a fork build, `VERSION-fN`
+(`0.12.29-f1`, `0.12.29-f2`, ...; `FORK=N`, default 0 for a local build). CI
+numbers them itself and releases each as its own `vVERSION-fN`, so earlier
+builds stay downloadable. The app looks for a newer release of its repository
+twice a day and offers it (`UPDATE_REPO`; a private repository cannot be
+checked without signing in, so it stays quiet then).
+
 On GitHub, `.github/workflows/build.yml` builds on demand, on a `v*` tag, and
-daily when GenOffice has a new release. To sign with your own key, set the
+daily when GenOffice has a new release. A manual run with `release` checked publishes the build. To sign with your own key, set the
 secrets `KEYSTORE_BASE64` (`base64 -w0 release.keystore`), `KEYSTORE_PASS`
 and `KEY_ALIAS`; without them each build uses a throwaway key, and an APK
 signed with one key does not update an install signed with another.

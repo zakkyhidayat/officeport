@@ -3,7 +3,9 @@
 window titles, menus, About, the home tab, help and settings text. The
 first-run slides lose GenOffice's GenTeam offer and GitHub star (the second
 slide tells where to add fonts instead), the home page its star prompt, and
-GenOffice's logo images become the app's (branding/).
+GenOffice's logo images become the app's (branding/). Usage statistics
+(Google Analytics with GenOffice's keys) are taken out: no keys, no setting,
+no first-run notice.
 
     scripts/rebrand.py APP_DIR NAME
 
@@ -106,6 +108,28 @@ def logos(app, name):
     return n
 
 
+def no_analytics(path):
+    """No usage-statistics switch in Settings, no notice on the first-run slides."""
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    new = text.replace('    showAnalyticsNotice: true,\n', '')
+    label = 'children: t("setAnalytics") }),'
+    i = new.find(label)
+    opener = '/* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "set-field", children: ['
+    while i != -1:
+        j = new.rfind(opener, 0, i)
+        # the Settings row (its label sits right inside it), not the slide's notice
+        if j != -1 and i - j < 400 and 'set-field-label' in new[j:i]:
+            new = new[:j] + 'false && ' + new[j:]
+            i += len('false && ')
+        i = new.find(label, i + len(label))
+    if new == text:
+        return False
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(new)
+    return True
+
+
 def no_star_prompt(path):
     """The home page's "star us on GitHub" card never shows."""
     with open(path, encoding='utf-8') as f:
@@ -133,6 +157,7 @@ def main():
                 slides += 1
             if f.endswith('.js'):
                 no_star_prompt(os.path.join(root, f))
+                no_analytics(os.path.join(root, f))
     print(f'rebrand: {logos(app, name)} logo files')
     if not slides:
         print('rebrand: first-run slides not found; left as GenOffice ships them')
@@ -140,6 +165,8 @@ def main():
     with open(pkg_path, encoding='utf-8') as f:
         pkg = json.load(f)
     pkg['productName'] = name
+    # GenOffice's Google Analytics keys: without them it sends nothing
+    pkg.pop('genofficeAnalytics', None)
     with open(pkg_path, 'w', encoding='utf-8') as f:
         json.dump(pkg, f, indent=2)
         f.write('\n')

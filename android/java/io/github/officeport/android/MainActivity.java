@@ -356,6 +356,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
             connected = true;
             showFontsHint();
             watchFonts();
+            Updates.check(this);
             sendDisplay();
             for (String p : pendingOpen) host.event("open-file", "path", p);
             pendingOpen.clear();

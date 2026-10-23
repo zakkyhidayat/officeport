@@ -13,8 +13,13 @@
 #   KEYSTORE, KEYSTORE_PASS, KEY_ALIAS   release signing key
 #                       (default: build/debug.keystore, created if missing)
 #   JOBS                build threads (default 4)
+#   FORK                this fork's build number for the GenOffice version
+#                       (1, 2, ...): the app is VERSION-fFORK (default 0: a
+#                       local build, VERSION-f0)
+#   UPDATE_REPO         owner/repo whose GitHub releases the app checks for
+#                       updates (default: none, no checks)
 #
-# Output: dist/officeport-VERSION-{arm64-v8a,x86_64,universal}.apk
+# Output: dist/officeport-VERSION-fFORK-{arm64-v8a,x86_64,universal}.apk
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -31,7 +36,10 @@ version=${1:-}
 if [[ -z $version ]]; then
     version=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"].lstrip("v"))')
 fi
-echo "== GenOffice $version"
+fork=${FORK:-0}
+[[ $fork =~ ^[0-9]+$ && $fork -lt 100 ]] || { echo "FORK must be 0-99" >&2; exit 2; }
+app_version=$version-f$fork
+echo "== GenOffice $version, $app_version"
 
 # --- GenOffice's Linux release ----------------------------------------------------
 deb=$build/genoffice_${version}_amd64.deb
@@ -68,6 +76,7 @@ rm -rf "$assets" && mkdir -p "$assets"
 du -sb "$payload" | cut -f1 > "$assets/payload.size"
 stamp="$version-$(sha256sum "$assets/payload.zip" | cut -c1-16)"
 echo "$stamp" > "$assets/payload.stamp"
+[[ -n ${UPDATE_REPO:-} ]] && echo "$UPDATE_REPO" > "$assets/update.repo"
 echo "payload: $(du -sh "$payload" | cut -f1) -> $(du -h "$assets/payload.zip" | cut -f1)"
 
 # --- native: Node and the xlsx sidecar -------------------------------------------------------
@@ -92,8 +101,10 @@ javac --release 17 -nowarn -encoding UTF-8 -cp "$platform_jar" -d "$classes" $(f
 
 # --- resources and manifest ----------------------------------------------------------------------
 IFS=. read -r v1 v2 v3 <<<"${version%%-*}"
-version_code=$(( v1 * 1000000 + v2 * 1000 + v3 ))
-sed -e "s/@VERSION_CODE@/$version_code/" -e "s/@VERSION_NAME@/$version/" "$here/android/AndroidManifest.xml" > "$build/AndroidManifest.xml"
+# two digits for the fork build: 0.12.29-f3 is 1202903 (above 12029, the code
+# builds had before fork numbers)
+version_code=$(( (v1 * 1000000 + v2 * 1000 + v3) * 100 + fork ))
+sed -e "s/@VERSION_CODE@/$version_code/" -e "s/@VERSION_NAME@/$app_version/" "$here/android/AndroidManifest.xml" > "$build/AndroidManifest.xml"
 rm -rf "$build/res.zip"
 "$tools/aapt2" compile --dir "$here/android/res" -o "$build/res.zip"
 
@@ -122,8 +133,8 @@ package() { # NAME ABI...
     (cd "$build" && zip -q -X -0 "$work/base.apk" assets/payload.zip && zip -q -X "$work/base.apk" assets/payload.size assets/payload.stamp)
     "$tools/zipalign" -f -P 16 4 "$work/base.apk" "$work/aligned.apk"
     "$tools/apksigner" sign --ks "$keystore" --ks-pass "pass:$pass" --key-pass "pass:$pass" --ks-key-alias "$alias" \
-        --out "$dist/officeport-$version-$name.apk" "$work/aligned.apk"
-    echo "built dist/officeport-$version-$name.apk ($(du -h "$dist/officeport-$version-$name.apk" | cut -f1))"
+        --out "$dist/officeport-$app_version-$name.apk" "$work/aligned.apk"
+    echo "built dist/officeport-$app_version-$name.apk ($(du -h "$dist/officeport-$app_version-$name.apk" | cut -f1))"
 }
 
 package arm64-v8a arm64-v8a
