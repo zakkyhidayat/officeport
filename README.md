@@ -65,3 +65,8 @@ Spelling follows Android's system spell checker and its languages (Settings >
 System > Languages > Spell checker). A word added to the dictionary from the
 context menu stops being offered as a mistake there, but WebView still
 underlines it: only the keyboard can add words to Android's own dictionary.
+
+Fonts: the app uses Android's fonts (`/system/fonts`, `/product/fonts`) and
+any `.ttf`, `.otf` or `.ttc` file put in `Documents/<app name>/Fonts` (made
+when the app has all-files access; not subfolders). A font added there is
+picked up after a restart, which the app offers when it sees the file.
