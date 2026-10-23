@@ -1,5 +1,7 @@
 # Officeport
 
+<img src="docs/logo.svg" alt="" width="96">
+
 [GenOffice](https://github.com/genspark-ai/genoffice) for Android desktops:
 Googlebook, Samsung DeX, and other Android devices with a keyboard and a
 large screen. arm64-v8a and x86_64.
