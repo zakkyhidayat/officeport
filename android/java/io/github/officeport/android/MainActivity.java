@@ -91,6 +91,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
     private NodeRuntime runtime;
     private HostChannel host;
     private Paths paths;
+    private Spelling spelling;
     private String token;
     private float density;
     private String userAgent;
@@ -156,6 +157,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         showSplash();
         WebView.setWebContentsDebuggingEnabled(true);
         paths = new Paths(this);
+        spelling = new Spelling(this);
         token = NodeRuntime.newToken();
         runtime = new NodeRuntime(this, this);
         root.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
@@ -389,6 +391,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
                 case "app.quit": quit(); break;
                 case "app.relaunch": relaunch(); break;
                 case "theme.set": break;
+                case "spell.check": spelling.check(c.optString("word"), c.optString("language"), r -> host.reply(req, r)); break;
                 default:
                     Log.w(TAG, "unknown command " + name);
                     if (req > 0) host.fail(req, "unsupported on Android: " + name);
@@ -445,7 +448,13 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
 
     private void createWebView(int wc) {
         if (webs.containsKey(wc)) return;
-        WebView v = new WebView(this);
+        // no floating Cut/Copy toolbar over the app's own context menu (as on a desktop)
+        WebView v = new WebView(this) {
+            @Override
+            public android.view.ActionMode startActionMode(android.view.ActionMode.Callback callback, int type) {
+                return type == android.view.ActionMode.TYPE_FLOATING ? null : super.startActionMode(callback, type);
+            }
+        };
         WebSettings s = v.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
@@ -1253,6 +1262,7 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         }
         for (WebView v : webs.values()) v.destroy();
         webs.clear();
+        if (spelling != null) spelling.close();
         super.onDestroy();
     }
 }

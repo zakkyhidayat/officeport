@@ -22,6 +22,7 @@ GenOffice's own release files unchanged:
 | preload scripts, `ipcRenderer` | `runtime/page.js`, injected into each page; IPC over loopback HTTP (`runtime/bus.js`) |
 | custom schemes (`genoffice-app://docs/…`) | `http://docs.genoffice-app.localhost:PORT/…`, served by the main process's own protocol handlers |
 | dialogs, menus, printing | Android's file picker, AlertDialog, PopupMenu, PrintManager |
+| Chromium's spell checker | Android's system spell checker (the keyboard's): WebView's underlines and the context menu's suggestions |
 | `xlsx-sidecar` (Rust) | cross-compiled for Android with the NDK |
 | window buttons | none: Android's window caption draws them |
 
@@ -29,7 +30,7 @@ GenOffice's own release files unchanged:
 
 Needs the Android SDK (build-tools, a platform), the NDK, Rust with the
 `aarch64-linux-android` and `x86_64-linux-android` targets, JDK 17+,
-Node (for `npx @electron/asar`), `patchelf`, `zip` and `ar`.
+Node (for `npx @electron/asar`), `zip` and `ar`.
 
 ```bash
 ANDROID_HOME=~/Android/Sdk ANDROID_NDK_HOME=~/Android/Sdk/ndk/29.0.14206865 scripts/build-apk.sh 0.12.29
@@ -52,9 +53,13 @@ save is written back.
 
 ## Not available on Android
 
-Spell checking, screen capture, the `genoffice` command-line tool, and
-auto-update (install a newer APK instead). Printing goes through Android's
-print dialog.
+Screen capture, the `genoffice` command-line tool, and auto-update (install a
+newer APK instead). Printing goes through Android's print dialog.
+
+Spelling follows Android's system spell checker and its languages (Settings >
+System > Languages > Spell checker). A word added to the dictionary from the
+context menu stops being offered as a mistake there, but WebView still
+underlines it: only the keyboard can add words to Android's own dictionary.
 
 ## GNOME window buttons for desktop GenOffice (Linux)
 

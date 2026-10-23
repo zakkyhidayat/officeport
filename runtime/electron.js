@@ -478,6 +478,9 @@ class WebContents extends EventEmitter {
   unselect() {
     this._edit('unselect')
   }
+  replaceMisspelling(text) {
+    bus.sendToPage(this.id, { replaceWord: String(text) })
+  }
   replace(text) {
     this.executeJavaScript(`document.execCommand('insertText', false, ${JSON.stringify(text)})`).catch(() => {})
   }
@@ -627,7 +630,9 @@ class WebContents extends EventEmitter {
         this._setTitle(msg.title)
         break
       case 'context-menu':
-        this.emit('context-menu', { preventDefault() {}, defaultPrevented: false }, msg.params)
+        withSpelling(msg.params).then((params) => {
+          if (!this._destroyed) this.emit('context-menu', { preventDefault() {}, defaultPrevented: false }, params)
+        })
         break
       case 'menu-accelerator':
         menuAccelerator(msg.id, this)
@@ -1621,6 +1626,60 @@ const nativeImage = fallback(
   'nativeImage',
 )
 
+// --- spelling -------------------------------------------------------------------------------
+// Android's system spell checker draws WebView's underlines; the context
+// menu's misspelled word and suggestions come from it too (spell.check),
+// minus the words added to the app's own dictionary.
+
+function systemLanguage() {
+  return process.env.GO_LOCALE || 'en-US'
+}
+
+const spell = {
+  enabled: true,
+  languages: [systemLanguage()],
+  _words: null,
+  file() {
+    return path.join(paths.userData, 'Custom Dictionary.txt')
+  },
+  words() {
+    if (!this._words) {
+      try {
+        this._words = new Set(fs.readFileSync(this.file(), 'utf8').split('\n').filter(Boolean))
+      } catch {
+        this._words = new Set()
+      }
+    }
+    return this._words
+  },
+  save() {
+    try {
+      fs.writeFileSync(this.file(), [...this.words()].join('\n') + '\n')
+    } catch (err) {
+      console.error('[spell] save', err.message)
+    }
+  },
+}
+
+async function withSpelling(params) {
+  const word = params.spellWord
+  delete params.spellWord
+  if (!spell.enabled || !params.isEditable || !word || spell.words().has(word)) return params
+  try {
+    const r = await Promise.race([
+      bus.request('spell.check', { word, language: spell.languages[0] || '' }),
+      new Promise((resolve) => setTimeout(() => resolve(null), 800)),
+    ])
+    if (r && r.misspelled) {
+      params.misspelledWord = word
+      params.dictionarySuggestions = (r.suggestions || []).filter((s) => s && s !== word).slice(0, 5)
+    }
+  } catch (err) {
+    console.error('[spell]', err.message)
+  }
+  return params
+}
+
 // --- protocol, net, session ------------------------------------------------------------
 
 const protocol = fallback(
@@ -1696,14 +1755,25 @@ function makeSession(partition) {
     setPermissionCheckHandler() {},
     setDevicePermissionHandler() {},
     setDisplayMediaRequestHandler() {},
-    setSpellCheckerEnabled() {},
-    isSpellCheckerEnabled: () => false,
-    setSpellCheckerLanguages() {},
-    getSpellCheckerLanguages: () => [],
-    availableSpellCheckerLanguages: [],
-    addWordToSpellCheckerDictionary: () => false,
-    removeWordFromSpellCheckerDictionary: () => false,
-    listWordsInSpellCheckerDictionary: () => Promise.resolve([]),
+    setSpellCheckerEnabled(on) {
+      spell.enabled = !!on
+    },
+    isSpellCheckerEnabled: () => spell.enabled,
+    setSpellCheckerLanguages(langs) {
+      spell.languages = Array.isArray(langs) && langs.length ? langs.slice(0, 1) : spell.languages
+    },
+    getSpellCheckerLanguages: () => spell.languages.slice(),
+    addWordToSpellCheckerDictionary(word) {
+      spell.words().add(String(word))
+      spell.save()
+      return true
+    },
+    removeWordFromSpellCheckerDictionary(word) {
+      const removed = spell.words().delete(String(word))
+      if (removed) spell.save()
+      return removed
+    },
+    listWordsInSpellCheckerDictionary: () => Promise.resolve([...spell.words()]),
     setSpellCheckerDictionaryDownloadURL() {},
     clearCache: () => Promise.resolve(),
     clearStorageData: () => Promise.resolve(),
@@ -1725,6 +1795,9 @@ function makeSession(partition) {
     cookies: fallback({ get: () => Promise.resolve([]), set: () => Promise.resolve(), remove: () => Promise.resolve(), flushStore: () => Promise.resolve(), on() {} }, 'cookies'),
     serviceWorkers: fallback({ getAllRunning: () => ({}), on() {} }, 'serviceWorkers'),
     extensions: fallback({ getAllExtensions: () => [], loadExtension: () => Promise.reject(new Error('no extensions')) }, 'extensions'),
+  })
+  Object.defineProperty(s, 'availableSpellCheckerLanguages', {
+    get: () => [...new Set([systemLanguage(), ...spell.languages])],
   })
   return s
 }

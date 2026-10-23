@@ -281,6 +281,7 @@
     if (m.inputHooks !== undefined) inputHooks = m.inputHooks
     if (m.zoom !== undefined) setZoom(m.zoom)
     if (m.css !== undefined) electron.webFrame.insertCSS(m.css)
+    if (m.replaceWord !== undefined) replaceWord(m.replaceWord)
   }
 
   const events = new EventSource('/__go/events' + qs('&page=' + pageId))
@@ -448,11 +449,49 @@
     }
   })
 
-  // Electron's 'context-menu' event (the app draws its own menus from it)
+  // the word under the pointer in editable text, and its range (replaceMisspelling)
+  const WORD_CHAR = /[\p{L}\p{M}\p{N}'’]/u
+  let spellRange = null
+  function wordAt(x, y) {
+    spellRange = null
+    const caret = document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) : null
+    const node = caret && caret.startContainer
+    if (!node || node.nodeType !== Node.TEXT_NODE) return ''
+    const text = node.data
+    let start = caret.startOffset
+    let end = caret.startOffset
+    while (start > 0 && WORD_CHAR.test(text[start - 1])) start--
+    while (end < text.length && WORD_CHAR.test(text[end])) end++
+    while (start < end && /['’]/.test(text[start])) start++
+    while (end > start && /['’]/.test(text[end - 1])) end--
+    if (start === end || /^\p{N}+$/u.test(text.slice(start, end))) return ''
+    spellRange = document.createRange()
+    spellRange.setStart(node, start)
+    spellRange.setEnd(node, end)
+    return text.slice(start, end)
+  }
+
+  // Electron's replaceMisspelling: the selection when the app has selected
+  // the word itself, else the word the context menu was opened on
+  function replaceWord(text) {
+    const sel = window.getSelection()
+    if (sel.isCollapsed && spellRange) {
+      sel.removeAllRanges()
+      sel.addRange(spellRange)
+    }
+    if (!sel.isCollapsed) document.execCommand('insertText', false, text)
+    spellRange = null
+  }
+
+  // Electron's 'context-menu' event (the app draws its own menus from it).
+  // Electron has no menu of its own; WebView would show one (Cut, Copy,
+  // Select all) over the app's, so the event ends here.
   window.addEventListener('contextmenu', (e) => {
     if (e.defaultPrevented) return
+    e.preventDefault()
     const t = e.target instanceof Element ? e.target : null
     const editable = !!(t && (t.isContentEditable || /^(INPUT|TEXTAREA)$/.test(t.tagName)))
+    const spellWord = editable && t.spellcheck !== false ? wordAt(e.clientX, e.clientY) : ''
     const selection = String(window.getSelection() || '')
     const link = t && t.closest('a[href]')
     const img = t && t.closest('img')
@@ -484,6 +523,7 @@
         inputFieldType: t && t.tagName === 'INPUT' ? t.type : editable ? 'plainText' : 'none',
         spellcheckEnabled: false,
         menuSourceType: 'mouse',
+        spellWord,
         titleText: '',
         altText: img ? img.alt : '',
         suggestedFilename: '',

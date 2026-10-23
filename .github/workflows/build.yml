@@ -43,7 +43,7 @@ jobs:
         if: steps.version.outputs.skip != 'true'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq patchelf zip
+          sudo apt-get install -y -qq zip
           rustup target add aarch64-linux-android x86_64-linux-android
           echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
           echo "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"

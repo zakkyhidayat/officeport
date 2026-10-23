@@ -3,13 +3,17 @@
 NDK). Downloads nodejs-lts and the libraries it needs for each ABI, and lays
 them out as jniLibs/<abi>/lib*.so: Android extracts only lib*.so files from
 an APK, and lets an app execute only what is in its native library
-directory. The node binary becomes libgonode.so; every library is renamed
-(and the names it is linked against rewritten with patchelf) to
-libgo_<name>.so.
+directory. The node binary becomes libgonode.so; a library whose name is not
+lib*.so (libssl.so.3) gets one (libgossl.so).
+
+The new names are written over the old ones inside each file's own string
+table (DT_NEEDED, DT_SONAME), no longer than them, so the files keep the
+layout Termux built: Android's linker rejects files that tools like patchelf
+have rearranged, depending on the tool's version.
 
     scripts/fetch-node.py OUT_DIR [--cache DIR]
 
-Needs patchelf and llvm-readelf (or readelf) on PATH.
+Needs llvm-readelf (or readelf) on PATH.
 """
 import argparse
 import io
@@ -17,6 +21,7 @@ import lzma
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tarfile
@@ -88,22 +93,65 @@ def readelf():
     sys.exit('readelf not found')
 
 
-def strip(path):
-    for tool in ('llvm-strip', 'strip'):
-        if shutil.which(tool):
-            subprocess.run([tool, '--strip-unneeded', path], check=True)
-            return
-
-
 def needed(path):
     out = subprocess.run([readelf(), '-d', path], capture_output=True, text=True, check=True).stdout
     return re.findall(r'\(NEEDED\)\s+Shared library: \[(.+?)\]', out)
 
 
 def go_name(lib):
-    base = lib[3:] if lib.startswith('lib') else lib
-    base = re.sub(r'\.so(\.|$)', '_', base).strip('_')
-    return f'libgo_{re.sub(r"[^A-Za-z0-9_+]", "_", base)}.so'
+    """An Android-installable name for a library, no longer than its own."""
+    if re.fullmatch(r'lib[A-Za-z0-9_+-]+\.so', lib) and lib not in SYSTEM_LIBS:
+        return lib
+    base = re.sub(r'\.so(\..*)?$', '', lib[3:] if lib.startswith('lib') else lib)
+    for name in (f'libgo{base}.so', f'libg{base}.so', f'lib{base}.so'):
+        if len(name) <= len(lib) and name not in SYSTEM_LIBS:
+            return name
+    sys.exit(f'no short enough name for {lib}')
+
+
+def rename_in_elf(path, names):
+    """Rewrites DT_NEEDED and DT_SONAME strings of a 64-bit ELF in place."""
+    data = bytearray(open(path, 'rb').read())
+    if data[:4] != b'\x7fELF' or data[4] != 2 or data[5] != 1:
+        sys.exit(f'{path}: not a 64-bit little-endian ELF')
+    phoff, = struct.unpack_from('<Q', data, 0x20)
+    phentsize, phnum = struct.unpack_from('<HH', data, 0x36)
+    loads, dynamic = [], None
+    for i in range(phnum):
+        p_type, _flags, offset, vaddr, _paddr, filesz, _memsz, _align = struct.unpack_from('<IIQQQQQQ', data, phoff + i * phentsize)
+        if p_type == 1:
+            loads.append((vaddr, offset, filesz))
+        elif p_type == 2:
+            dynamic = (offset, filesz)
+
+    def file_offset(vaddr):
+        for v, o, size in loads:
+            if v <= vaddr < v + size:
+                return o + vaddr - v
+        sys.exit(f'{path}: address {vaddr:#x} outside the file')
+
+    entries, strtab = [], None
+    for j in range(dynamic[1] // 16):
+        tag, value = struct.unpack_from('<qQ', data, dynamic[0] + 16 * j)
+        if tag == 0:
+            break
+        entries.append((tag, value))
+        if tag == 5:  # DT_STRTAB
+            strtab = file_offset(value)
+    changed = False
+    for tag, value in entries:
+        if tag not in (1, 14):  # DT_NEEDED, DT_SONAME
+            continue
+        start = strtab + value
+        end = data.index(0, start)
+        old = data[start:end].decode()
+        new = names.get(old, old)
+        if new != old:
+            data[start:end] = new.encode() + b'\0' * (len(old) - len(new))
+            changed = True
+    if changed:
+        with open(path, 'wb') as f:
+            f.write(data)
 
 
 def build_abi(arch, abi, out, cache):
@@ -130,29 +178,28 @@ def build_abi(arch, abi, out, cache):
     os.makedirs(dest)
     node = os.path.join(dest, 'libgonode.so')
     shutil.copy(os.path.join(usr, 'bin', 'node'), node)
-    strip(node)
 
-    todo, done = [node], set()
+    # every library node needs, directly or not, renamed where Android needs it
+    names, files, todo = {}, [node], [node]
     while todo:
         path = todo.pop()
         for lib in needed(path):
-            if lib in SYSTEM_LIBS:
+            if lib in SYSTEM_LIBS or lib in names:
                 continue
             src = resolve(lib)
             if src is None:
                 sys.exit(f'{abi}: {os.path.basename(path)} needs {lib}, not found in the packages')
-            target = go_name(lib)
-            subprocess.run(['patchelf', '--replace-needed', lib, target, path], check=True)
-            if target not in done:
-                done.add(target)
-                copy = os.path.join(dest, target)
-                shutil.copy(src, copy)
-                os.chmod(copy, 0o755)
-                strip(copy)
-                subprocess.run(['patchelf', '--set-soname', target, copy], check=True)
-                todo.append(copy)
-        subprocess.run(['patchelf', '--remove-rpath', path], check=True)
-    os.chmod(node, 0o755)
+            names[lib] = go_name(lib)
+            copy = os.path.join(dest, names[lib])
+            shutil.copy(src, copy)
+            files.append(copy)
+            todo.append(copy)
+    for path in files:
+        rename_in_elf(path, names)
+        os.chmod(path, 0o755)
+    done = set(names.values())
+    for lib, name in sorted(names.items()):
+        print(f'  {lib} -> {name}')
     with open(os.path.join(dest, '.node-version'), 'w') as f:
         f.write(version + '\n')
     total = sum(os.path.getsize(os.path.join(dest, f)) for f in os.listdir(dest))
