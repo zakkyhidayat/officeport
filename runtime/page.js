@@ -39,6 +39,11 @@
   if (!wc) wc = boot.wc || 0
   const urls = window.__goUrlMap.make(boot.port)
   const customSchemes = new Set(boot.schemes || [])
+  // IPC and events on their own host name: Chromium allows 6 connections per
+  // host, and the event stream plus slow invokes must not hold up the page's
+  // own files (or the other way round). text/plain keeps the requests "simple",
+  // with no CORS preflight round trip.
+  const BUS = `http://ipc.localhost:${boot.port}`
   const pageId = Math.random().toString(36).slice(2) + Date.now().toString(36)
   let seq = 0
 
@@ -47,15 +52,15 @@
   }
 
   function postAsync(body) {
-    return fetch('/__go/ipc' + qs(), { method: 'POST', body, headers: { 'content-type': 'application/json' } }).then((r) =>
+    return fetch(BUS + '/__go/ipc' + qs(), { method: 'POST', body, headers: { 'content-type': 'text/plain' } }).then((r) =>
       r.json(),
     )
   }
 
   function postSync(body) {
     const x = new XMLHttpRequest()
-    x.open('POST', '/__go/ipc' + qs(), false)
-    x.setRequestHeader('content-type', 'application/json')
+    x.open('POST', BUS + '/__go/ipc' + qs(), false)
+    x.setRequestHeader('content-type', 'text/plain')
     x.send(body)
     return JSON.parse(x.responseText || '{}')
   }
@@ -298,7 +303,7 @@
     if (m.replaceWord !== undefined) replaceWord(m.replaceWord)
   }
 
-  const events = new EventSource('/__go/events' + qs('&page=' + pageId))
+  const events = new EventSource(BUS + '/__go/events' + qs('&page=' + pageId))
   events.onmessage = (e) => {
     try {
       onMessage(JSON.parse(e.data))
