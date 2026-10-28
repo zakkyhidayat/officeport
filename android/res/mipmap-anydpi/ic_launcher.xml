@@ -3,6 +3,6 @@
      square, teardrop) and may move it; monochrome is for themed icons (Android 13+) -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/icon_bg" />
-    <foreground android:drawable="@drawable/ic_foreground" />
-    <monochrome android:drawable="@drawable/ic_foreground" />
+    <foreground android:drawable="@drawable/ic_genoffice" />
+    <monochrome android:drawable="@drawable/ic_genoffice" />
 </adaptive-icon>
