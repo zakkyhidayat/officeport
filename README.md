@@ -1,4 +1,4 @@
-# Officeport
+# GenOffice for Android (unofficial fork)
 
 <img src="docs/logo.svg" alt="" width="96">
 
@@ -6,12 +6,14 @@
 Googlebook, Samsung DeX, and other Android devices with a keyboard and a
 large screen. arm64-v8a and x86_64.
 
-This is an unofficial fork, built on GenOffice's codebase and not affiliated
-with Genspark or Mainfunc. GenOffice is Apache-2.0; its name and logo are
-Mainfunc's trademarks, so the app has its own name and icon: the build shows
-the app's name (`app_name` in `android/res/values/strings.xml`) wherever
-GenOffice's release shows "GenOffice" (`scripts/rebrand.py`), except where
-Genspark's servers see it (the user agent and the MCP client name).
+**This is an unofficial fork.** It is built on GenOffice's codebase and is not
+affiliated with Genspark or Mainfunc. GenOffice is Apache-2.0; its name and
+logo are Mainfunc's trademarks. This fork keeps the name "GenOffice" in the app
+and on its release pages, so it may be taken for the official app; it is not.
+
+It is a hobby fork, not maintained as a product. Bugs in GenOffice itself
+should be reported to GenOffice upstream. This fork only follows upstream when
+there is a major upstream release.
 
 ## How it works
 
@@ -19,7 +21,7 @@ GenOffice is an Electron app. Electron does not run on Android, but almost
 all of GenOffice runs on plain Node and Chromium, so the port runs
 GenOffice's own release files unchanged:
 
-| Electron | Officeport |
+| Electron | This fork |
 | --- | --- |
 | main process (Node) | Node 24 from Termux's packages, a child process of the app |
 | `require('electron')` | `runtime/electron.js`, a stand-in for Electron's API |
