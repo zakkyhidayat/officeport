@@ -89,6 +89,9 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
     private ProgressBar splashBar;
 
     private NodeRuntime runtime;
+    /** Set by the start thread: Node is running, and whether it saw all-files access (its font links need it). */
+    private volatile boolean nodeStarted;
+    private volatile boolean startedWithFileAccess;
     private HostChannel host;
     private Paths paths;
     private Spelling spelling;
@@ -201,7 +204,9 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
                     env.put("GO_DOWNLOADS", new File(storage, Environment.DIRECTORY_DOWNLOADS).getPath());
                     env.put("GO_PICTURES", new File(storage, Environment.DIRECTORY_PICTURES).getPath());
                 }
+                startedWithFileAccess = Paths.hasAllFiles();
                 runtime.start(env);
+                nodeStarted = true;
             } catch (Exception e) {
                 Log.e(TAG, "start", e);
                 main.post(() -> showFailure(appName() + " could not start.", String.valueOf(e)));
@@ -1457,6 +1462,14 @@ public final class MainActivity extends Activity implements NodeRuntime.Listener
         if (host != null && connected && level >= TRIM_MEMORY_RUNNING_CRITICAL) {
             host.event("memory", "level", level);
         }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // back from granting all-files access: the font folders are read only
+        // when Node starts, so start it again with them
+        if (nodeStarted && !startedWithFileAccess && Paths.hasAllFiles()) relaunch();
     }
 
     @Override

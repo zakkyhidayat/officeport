@@ -98,6 +98,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         if: steps.version.outputs.skip != 'true'
+        # the APKs also go to the release below: a full artifact quota must not stop it
+        continue-on-error: true
         with:
           name: officeport-${{ steps.version.outputs.app }}
           path: dist/*.apk
